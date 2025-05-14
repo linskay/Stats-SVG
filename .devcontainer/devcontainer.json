@@ -1,0 +1,13 @@
+        {
+          "name": "Stats-SVG Codespace",
+          "image": "mcr.microsoft.com/devcontainers/javascript-node:18",
+          "features": {
+            "ghcr.io/devcontainers/features/github-cli:1": {}
+          },
+          "remoteEnv": {
+            "GH_TOKEN": "${localEnv:GH_TOKEN}",
+            "GH_USERNAME": "${localEnv:GH_USERNAME}"
+          },
+          "postCreateCommand": "npm install"
+        }
+        
