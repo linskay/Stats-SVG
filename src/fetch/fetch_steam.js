@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import axios from 'axios';
+import { steamClient, upstreamRequest } from './http.js';
 
 const steamCDNBaseUrl = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/';
 
@@ -7,7 +7,7 @@ const steamCDNBaseUrl = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/i
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
 
-const fetchSteamStatus = async (steamID) => {
+const fetchSteamStatus = async (steamID, deadline) => {
     const apiKey = process.env.STEAM_API_KEY; // Load API key from .env
     const userProfileUrl = `http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${apiKey}&steamids=${steamID}&format=json`;
     const recentGamesUrl = `http://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key=${apiKey}&steamid=${steamID}&format=json`;
@@ -26,11 +26,11 @@ const fetchSteamStatus = async (steamID) => {
         console.time('steam API calls');
         // Fetch data concurrently using Promise.all
         const [userProfileResponse, recentGamesResponse, ownedGamesResponse, badgesResponse, animatedAvatarResponse] = await Promise.all([
-            axios.get(userProfileUrl),
-            axios.get(recentGamesUrl),
-            axios.get(ownedGamesUrl),
-            axios.get(badgesUrl),
-            axios.get(animatedAvatarUrl)
+            upstreamRequest(steamClient, { method: 'get', url: userProfileUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: recentGamesUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: ownedGamesUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: badgesUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: animatedAvatarUrl }, deadline, 'Steam')
         ]);
         console.timeEnd('steam API calls');
 

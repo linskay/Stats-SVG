@@ -1,11 +1,15 @@
-import axios from 'axios';
+import { leetcodeClient, upstreamRequest } from './http.js';
 
 // Add a simple in-memory cache
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
 
-async function fetchLeetCodeStats(username) {
+async function fetchLeetCodeStats(username, deadline) {
   const LEETCODE_API_ENDPOINT = 'https://leetcode.com/graphql';
+  const headers = {
+    'Content-Type': 'application/json',
+    'Referer': 'https://leetcode.com'
+  };
 
   const skill_query = `
     query skillStats($username: String!) {
@@ -102,42 +106,22 @@ async function fetchLeetCodeStats(username) {
 
     console.time('leetcode API calls');
     const [user_data, skill_data, language_data, contest_data] = await Promise.all([
-      axios.post(LEETCODE_API_ENDPOINT, {
+      upstreamRequest(leetcodeClient, { method: 'post', url: LEETCODE_API_ENDPOINT, data: {
         query: user_query,
         variables: { username: username }
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Referer': 'https://leetcode.com'
-        }
-      }),
-      axios.post(LEETCODE_API_ENDPOINT, {
+      }, headers }, deadline, 'LeetCode'),
+      upstreamRequest(leetcodeClient, { method: 'post', url: LEETCODE_API_ENDPOINT, data: {
         query: skill_query,
         variables: { username: username }
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Referer': 'https://leetcode.com'
-        }
-      }),
-      axios.post(LEETCODE_API_ENDPOINT, {
+      }, headers }, deadline, 'LeetCode'),
+      upstreamRequest(leetcodeClient, { method: 'post', url: LEETCODE_API_ENDPOINT, data: {
         query: language_query,
         variables: { username: username }
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Referer': 'https://leetcode.com'
-        }
-      }),
-      axios.post(LEETCODE_API_ENDPOINT, {
+      }, headers }, deadline, 'LeetCode'),
+      upstreamRequest(leetcodeClient, { method: 'post', url: LEETCODE_API_ENDPOINT, data: {
         query: contest_query,
         variables: { username: username }
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Referer': 'https://leetcode.com'
-        }
-      })
+      }, headers }, deadline, 'LeetCode')
     ]);
 
     console.timeEnd('leetcode API calls');
