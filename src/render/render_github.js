@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import sizeOf from "image-size";
 import config from "../../config.js";
 import Icons from "../asset/icons.js";
+import { escapeSvg } from "../utils/escapeSvg.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -25,20 +26,6 @@ const fontsBase64 = JSON.parse(
 const DEFAULT_LANGUAGE_COLOR = "#cccccc";
 const CSS_HEX_COLOR_PATTERN =
   /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
-
-function escapeXml(value) {
-  return String(value ?? "").replace(
-    /[&<>"']/g,
-    (character) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&apos;",
-      })[character],
-  );
-}
 
 function sanitizeHexColor(color, fallback = DEFAULT_LANGUAGE_COLOR) {
   return typeof color === "string" && CSS_HEX_COLOR_PATTERN.test(color)
@@ -223,7 +210,7 @@ async function renderLanguageRing(
         ) - accumulatedOffset;
 
       const strokeColor = sanitizeHexColor(color);
-      const safeLanguage = escapeXml(language);
+      const safeLanguage = escapeSvg(language);
 
       const segment = `
       <circle cx="${languageRingConfig.language_ring_center_x}" cy="${languageRingConfig.language_ring_center_y}" r="${languageRingConfig.language_ring_radius}" 
@@ -566,7 +553,7 @@ async function renderStats(stats) {
 
       <rect class="background" width="100%" height="100%" />
 
-      <text x="50" y="40" class="title" font-size="36">${escapeXml(stats.name)}'s GitHub Stats</text>
+      <text x="50" y="40" class="title" font-size="36">${escapeSvg(stats.name)}'s GitHub Stats</text>
 
       <clipPath id="clipPathReveal">
         <rect x="0" y="0" height="100" width="0">
@@ -575,7 +562,7 @@ async function renderStats(stats) {
         </rect>
       </clipPath>
 
-      <text x="${svg_width - 20}" y="50" class="barcode" text-anchor="end" font-size="30" clip-path="url(#clipPathReveal)">${escapeXml(githubUrl)}</text>
+      <text x="${svg_width - 20}" y="50" class="barcode" text-anchor="end" font-size="30" clip-path="url(#clipPathReveal)">${escapeSvg(githubUrl)}</text>
 
       <!-- Initial dot -->
       <circle cx="10" cy="60" r="4" fill="${elementsConfig.icon_color}">
@@ -862,4 +849,4 @@ async function renderStats(stats) {
   return svg;
 }
 
-export { escapeXml, sanitizeHexColor, renderStats as default };
+export { renderStats as default };
