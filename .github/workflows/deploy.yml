@@ -1,0 +1,56 @@
+name: Deploy production
+
+on:
+  workflow_run:
+    workflows: [Quality]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.vercel.outputs.url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Pull Vercel production configuration
+        run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      - name: Build production deployment
+        run: npx vercel build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      - name: Deploy to Vercel production
+        id: vercel
+        run: echo "url=$(npx vercel deploy --prebuilt --prod --token=\"$VERCEL_TOKEN\")" >> "$GITHUB_OUTPUT"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      - name: Smoke test GitHub SVG endpoint
+        env:
+          DEPLOYMENT_URL: ${{ steps.vercel.outputs.url }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            --max-time 20 --dump-header response.headers --output response.svg \
+            "${DEPLOYMENT_URL}/api/github-status?username=octocat"
+          grep --ignore-case --quiet '^content-type: image/svg+xml' response.headers
+          grep --quiet '<svg' response.svg
