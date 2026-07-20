@@ -1,6 +1,5 @@
 import 'dotenv/config';
-import axios from 'axios';
-import { createTtlCache } from '../utils/cache.js';
+import { steamClient, upstreamRequest } from './http.js';
 
 const steamCDNBaseUrl = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/';
 const steamApiBaseUrl = 'https://api.steampowered.com/';
@@ -18,9 +17,7 @@ const buildSteamApiUrl = (path, apiKey, parameters = {}) => {
 
 const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 
-const fetchSteamStatus = async (steamID) => {
-    // The API handler validates the SteamID before calling this function.
-    const cacheKey = steamID;
+const fetchSteamStatus = async (steamID, deadline) => {
     const apiKey = process.env.STEAM_API_KEY; // Load API key from .env
     const userProfileUrl = buildSteamApiUrl('ISteamUser/GetPlayerSummaries/v0002/', apiKey, { steamids: steamID });
     const recentGamesUrl = buildSteamApiUrl('IPlayerService/GetRecentlyPlayedGames/v0001/', apiKey, { steamid: steamID });
@@ -42,11 +39,11 @@ const fetchSteamStatus = async (steamID) => {
         console.time('steam API calls');
         // Fetch data concurrently using Promise.all
         const [userProfileResponse, recentGamesResponse, ownedGamesResponse, badgesResponse, animatedAvatarResponse] = await Promise.all([
-            axios.get(userProfileUrl),
-            axios.get(recentGamesUrl),
-            axios.get(ownedGamesUrl),
-            axios.get(badgesUrl),
-            axios.get(animatedAvatarUrl)
+            upstreamRequest(steamClient, { method: 'get', url: userProfileUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: recentGamesUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: ownedGamesUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: badgesUrl }, deadline, 'Steam'),
+            upstreamRequest(steamClient, { method: 'get', url: animatedAvatarUrl }, deadline, 'Steam')
         ]);
         console.timeEnd('steam API calls');
 
