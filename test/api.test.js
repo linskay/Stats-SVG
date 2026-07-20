@@ -50,6 +50,35 @@ test("validates username query parameter before accessing upstream services", as
   assert.equal(validateUsername(["octo-cat"]), false);
 });
 
+test("rate limit rejects requests before a GitHub provider fetch or retry", async () => {
+  let calls = 0;
+  let sleeps = 0;
+  const handler = createHandler({
+    githubFetcher: async () => {
+      calls += 1;
+      throw { response: { status: 503 } };
+    },
+    maxRetries: 5,
+    sleep: async () => {
+      sleeps += 1;
+    },
+    rateLimiter: { limit: async () => ({ success: false, retryAfter: 42 }) },
+  });
+  const res = response();
+
+  await handler(
+    { params: { action: "github-status" }, query: { username: "octocat" } },
+    res,
+  );
+
+  assert.deepEqual(
+    [res.statusCode, res.body, res.headers["Retry-After"]],
+    [429, "Too Many Requests", "42"],
+  );
+  assert.equal(calls, 0);
+  assert.equal(sleeps, 0);
+});
+
 test("returns 404 for a missing upstream user and 502 for an upstream failure", async () => {
   const notFound = createHandler({
     githubFetcher: async () => {

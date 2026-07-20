@@ -3,6 +3,7 @@ import fetchLeetCodeStats from "../src/fetch/fetch_leetcode.js";
 import fetchSteamStatus from "../src/fetch/fetch_steam.js";
 import { REQUEST_DEADLINE_MS } from "../src/fetch/http.js";
 import renderStats from "../src/render/render_github.js";
+import { createVercelRateLimiter, clientKey } from "../src/rate_limit.js";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9-]{1,39}$/;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
@@ -145,6 +146,7 @@ export function createHandler({
   maxRetryDelay = DEFAULT_MAX_RETRY_DELAY_MS,
   sleep,
   random,
+  rateLimiter = createVercelRateLimiter(),
 } = {}) {
   const retryOptions = { deadlineMs, maxRetryDelay, sleep, random };
   return async function handler(req, res) {
@@ -162,6 +164,19 @@ export function createHandler({
       return res
         .status(400)
         .send("A valid username query parameter is required");
+    }
+
+    if (rateLimiter) {
+      try {
+        const result = await rateLimiter.limit(action, clientKey(req));
+        if (!result.success) {
+          res.setHeader("Retry-After", String(result.retryAfter));
+          return res.status(429).send("Too Many Requests");
+        }
+      } catch (error) {
+        console.error("Rate limit service error:", error);
+        return res.status(503).send("Rate limit service temporarily unavailable");
+      }
     }
 
     try {
