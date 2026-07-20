@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import NotFound from "../src/errors/not_found.js";
 import fetchGitHubData from "../src/fetch/fetch_github.js";
-import { githubClient } from "../src/fetch/http.js";
+import { githubClient, UpstreamRequestError } from "../src/fetch/http.js";
 
 test("deduplicates concurrent GitHub requests for the same user", async () => {
   const originalAdapter = githubClient.defaults.adapter;
@@ -152,6 +153,49 @@ test("deduplicates concurrent GitHub requests for the same user", async () => {
     assert.equal(requests.length, 4);
     assert.deepEqual(secondStats, stats);
     assert.deepEqual(thirdStats, stats);
+  } finally {
+    githubClient.defaults.adapter = originalAdapter;
+  }
+});
+
+test("converts HTTP 200 GitHub GraphQL errors to typed upstream errors", async () => {
+  const originalAdapter = githubClient.defaults.adapter;
+  githubClient.defaults.adapter = async (config) => ({
+    config,
+    status: 200,
+    data: {
+      errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }],
+    },
+  });
+
+  try {
+    await assert.rejects(fetchGitHubData("rate-limited-user"), (error) => {
+      assert.ok(error instanceof UpstreamRequestError);
+      assert.equal(error.status, 429);
+      assert.deepEqual(error.response.data.errors, [
+        { type: "RATE_LIMITED", message: "API rate limit exceeded" },
+      ]);
+      return true;
+    });
+  } finally {
+    githubClient.defaults.adapter = originalAdapter;
+  }
+});
+
+test("converts HTTP 200 GitHub user:null to NotFound", async () => {
+  const originalAdapter = githubClient.defaults.adapter;
+  githubClient.defaults.adapter = async (config) => ({
+    config,
+    status: 200,
+    data: { data: { user: null } },
+  });
+
+  try {
+    await assert.rejects(fetchGitHubData("missing-octocat"), (error) => {
+      assert.ok(error instanceof NotFound);
+      assert.equal(error.status, 404);
+      return true;
+    });
   } finally {
     githubClient.defaults.adapter = originalAdapter;
   }
