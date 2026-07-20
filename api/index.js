@@ -5,7 +5,9 @@ import { REQUEST_DEADLINE_MS } from "../src/fetch/http.js";
 import renderStats from "../src/render/render_github.js";
 import { createVercelRateLimiter, clientKey } from "../src/rate_limit.js";
 
-const USERNAME_PATTERN = /^[A-Za-z0-9-]{1,39}$/;
+const GITHUB_LOGIN_PATTERN = /^(?!-)(?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){1,39}$/;
+const LEETCODE_USERNAME_PATTERN = /^[A-Za-z0-9_-]{1,30}$/;
+const STEAM_ID_PATTERN = /^\d{17}$/;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 const NETWORK_ERROR_CODES = new Set([
   "ECONNABORTED",
@@ -71,8 +73,18 @@ function deadlineExceededError(cause) {
   return error;
 }
 
-function validateUsername(username) {
-  return typeof username === "string" && USERNAME_PATTERN.test(username);
+function validateGitHubLogin(login) {
+  return typeof login === "string" && GITHUB_LOGIN_PATTERN.test(login);
+}
+
+function validateLeetCodeUsername(username) {
+  return (
+    typeof username === "string" && LEETCODE_USERNAME_PATTERN.test(username)
+  );
+}
+
+function validateSteamId(steamId) {
+  return typeof steamId === "string" && STEAM_ID_PATTERN.test(steamId);
 }
 
 async function fetchWithRetry(
@@ -160,6 +172,12 @@ export function createHandler({
     ) {
       return res.status(404).send("Not Found");
     }
+
+    const validateUsername = {
+      "github-status": validateGitHubLogin,
+      "leetcode-status": validateLeetCodeUsername,
+      "steam-status": validateSteamId,
+    }[action];
     if (!validateUsername(username)) {
       return res
         .status(400)
@@ -220,5 +238,11 @@ export function createHandler({
   };
 }
 
-export { fetchWithRetry, sendUpstreamError, validateUsername };
+export {
+  fetchWithRetry,
+  sendUpstreamError,
+  validateGitHubLogin,
+  validateLeetCodeUsername,
+  validateSteamId,
+};
 export default createHandler();

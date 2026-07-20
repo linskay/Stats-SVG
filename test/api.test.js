@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   createHandler,
   isRetryableError,
-  validateUsername,
+  validateGitHubLogin,
+  validateLeetCodeUsername,
+  validateSteamId,
 } from "../api/index.js";
 import { UpstreamRequestError } from "../src/fetch/http.js";
 
@@ -30,7 +32,7 @@ function response() {
   };
 }
 
-test("validates username query parameter before accessing upstream services", async () => {
+test("validates endpoint-specific query parameters before accessing upstream services", async () => {
   let called = false;
   const handler = createHandler({
     githubFetcher: async () => {
@@ -46,8 +48,25 @@ test("validates username query parameter before accessing upstream services", as
 
   assert.equal(res.statusCode, 400);
   assert.equal(called, false);
-  assert.equal(validateUsername("octo-cat"), true);
-  assert.equal(validateUsername(["octo-cat"]), false);
+  assert.equal(validateGitHubLogin("octo-cat"), true);
+  assert.equal(validateGitHubLogin(["octo-cat"]), false);
+});
+
+test("accepts only numeric 17-digit Steam IDs", () => {
+  assert.equal(validateSteamId("76561198000000000"), true);
+  assert.equal(validateSteamId("not-a-steam-id"), false);
+  assert.equal(validateSteamId("7656119800000000"), false);
+});
+
+test("rejects GitHub logins with invalid hyphens", () => {
+  assert.equal(validateGitHubLogin("-octocat"), false);
+  assert.equal(validateGitHubLogin("octocat-"), false);
+  assert.equal(validateGitHubLogin("octo--cat"), false);
+});
+
+test("accepts public LeetCode username characters", () => {
+  assert.equal(validateLeetCodeUsername("leetcode"), true);
+  assert.equal(validateLeetCodeUsername("leetcode_user-42"), true);
 });
 
 test("rate limit rejects requests before a GitHub provider fetch or retry", async () => {
