@@ -6,7 +6,9 @@ import { githubClient } from "../src/fetch/http.js";
 test("builds GitHub statistics for a user from the shared HTTP client", async () => {
   const originalAdapter = githubClient.defaults.adapter;
   const queries = [];
+  const requests = [];
   githubClient.defaults.adapter = async (config) => {
+    requests.push(config);
     const { query } = JSON.parse(config.data);
     queries.push(query);
 
