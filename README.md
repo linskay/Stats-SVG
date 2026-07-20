@@ -19,7 +19,7 @@ This project generates a visually appealing, highly customizable SVG image displ
 Since the GitHub API only allows 5k requests per hour, the api provided by this repo could possibly hit the rate limiter. You can host your own instance of this repo on Vercel to avoid the rate limiter.
 
 > [!IMPORTANT]
-> This project uses only public GitHub data. Create a Personal Access Token (PAT) with no access to private repositories or other private data. Refer to the Manual Deployment section below for how to create the token.
+> The GitHub endpoint requires a GitHub Personal Access Token (PAT). A public deployment must **not** use a token that can access private data. Use a dedicated, least-privileged token that exposes only the public data required by the service.
 
 <details>
  <summary><b>Manual Deployment</b></summary>
@@ -28,8 +28,7 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
 1. Fork this repository to your GitHub account
 2. [Create a Personal Access Token (PAT)](https://github.com/settings/tokens/new)
    - Set the token name (e.g., "stats-svg")
-   - Prefer a fine-grained token limited to **Public Repositories (read-only)**, with no additional account or repository permissions.
-   - If you use a classic token, leave all scopes unselected; do **not** grant `repo`, `user`, or any other scope that can expose private data.
+   - Select only the minimum scopes needed for public GitHub data; do **not** grant the `repo` scope to a publicly deployed instance
    - Copy the generated token (you won't see it again so save it!)
 
 #### 2. Deploy to Vercel
@@ -62,7 +61,28 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
 
 ## Customization
 
-You can customize the appearance of the SVG by modifying the `config.js` file. This includes changing colors, dimensions, and other visual aspects of the generated image. If you want to modify the SVG code, you can do so in the `/src/card/renderStats.js` file.
+[`config.js`](config.js) is the shared presentation configuration for the GitHub SVG card. Use it to set the SVG width and height, colors for text, icons, and rank elements, the rank and language ring geometry, and the contribution chart's visible-day count, colors, and animation timings. If you want to modify the SVG markup itself, edit [`src/render/render_github.js`](src/render/render_github.js).
+
+## API
+
+The local server exposes the following endpoints. Each endpoint requires the `username` query parameter. For Steam, `username` must be the numeric Steam ID used by the Steam Web API.
+
+| Endpoint | Required parameter | Response |
+| --- | --- | --- |
+| `/api/github-status?username=GITHUB_LOGIN` | GitHub login | An `image/svg+xml` GitHub statistics card. It is rendered from GitHub profile, contribution, repository, language, and rank data. |
+| `/api/leetcode-status?username=LEETCODE_LOGIN` | LeetCode username | A JSON object containing the username, solved-problem skill groups, languages, and contest statistics. It does not render an SVG. |
+| `/api/steam-status?username=STEAM_ID` | Numeric Steam ID | A JSON object containing the Steam profile, status, recent and owned games, level, and playtime totals and platform percentages. It does not render an SVG. |
+
+All three data fetchers keep successful results in an in-memory cache for two minutes. Requests without a valid `username` value, unknown routes, or upstream API failures are not successful responses.
+
+### Environment variables
+
+| Variable | Required for | Purpose |
+| --- | --- | --- |
+| `GITHUB_TOKEN` | `/api/github-status` | Authenticates requests to the GitHub GraphQL API. For a public deployment, it must be a dedicated least-privileged token with no access to private repositories or other private account data. |
+| `STEAM_API_KEY` | `/api/steam-status` | Authenticates requests to the Steam Web API. |
+
+`/api/leetcode-status` does not require an environment variable: it queries LeetCode's public GraphQL endpoint. Set the variables in the deployment platform's environment-variable settings (or in a local `.env` file); never commit their values to the repository.
 
 ## Contributing
 
