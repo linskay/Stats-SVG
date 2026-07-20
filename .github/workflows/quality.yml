@@ -1,0 +1,23 @@
+name: Quality and security
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Test, lint, format, and security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install
+      - run: npm test
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm audit --audit-level=high
