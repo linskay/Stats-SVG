@@ -17,6 +17,30 @@ const dimensions = sizeOf(path.join(__dirname, '../asset/image.gif'));
 // Load the Base64 encoded fonts
 const fontsBase64 = JSON.parse(fs.readFileSync(path.join(__dirname, '../asset/fontsBase64.json'), 'utf8'));
 
+const DEFAULT_LANGUAGE_COLOR = '#cccccc';
+const CSS_HEX_COLOR_PATTERN = /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
+
+/**
+ * Escapes a value before it is interpolated into SVG XML text content or an
+ * attribute. Do not use this for values with a stricter expected format (such
+ * as colors); validate those values instead.
+ */
+function escapeXml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;',
+  })[character]);
+}
+
+function sanitizeHexColor(color, fallback = DEFAULT_LANGUAGE_COLOR) {
+  return typeof color === 'string' && CSS_HEX_COLOR_PATTERN.test(color)
+    ? color
+    : fallback;
+}
+
 function darkenHexColor(hex, darkenFactor) {
   let r = parseInt(hex.slice(1, 3), 16);
   let g = parseInt(hex.slice(3, 5), 16);
@@ -45,7 +69,7 @@ function convertNumberUnit(number) {
 }
 
 async function calculateGithubUrl(stats) {
-  return `https://github.com/${stats.login}`;
+  return `https://github.com/${encodeURIComponent(String(stats.login ?? ''))}`;
 }
 
 async function calculateSvgConfig(config) {
@@ -166,7 +190,8 @@ async function renderLanguageRing(languagePercentages, languageRingConfig, eleme
     // Calculate segment length based on accumulated percentage
     const segmentLength = Math.round((accumulatedPercentage / 100) * languageRingConfig.language_circumference) - accumulatedOffset;
     
-    const strokeColor = color || '#cccccc'; // Default color if not found
+    const strokeColor = sanitizeHexColor(color);
+    const escapedLanguage = escapeXml(language);
 
     const segment = `
       <circle cx="${languageRingConfig.language_ring_center_x}" cy="${languageRingConfig.language_ring_center_y}" r="${languageRingConfig.language_ring_radius}" 
@@ -189,7 +214,7 @@ async function renderLanguageRing(languagePercentages, languageRingConfig, eleme
       <g transform="translate(${column_x_offset}, ${text_y_position})" class="animate" style="animation-delay: ${index * 0.15}s;">
         <rect x="0" y="0" width="16" height="16" fill="${strokeColor}" />
         <text x="20" y="8" class="language-legend" dominant-baseline="central">
-          <tspan fill="${elementsConfig.text_label_color}">${language}</tspan>
+          <tspan fill="${elementsConfig.text_label_color}">${escapedLanguage}</tspan>
           <tspan fill="${elementsConfig.text_value_color}" dx="5">${value.toFixed(2)}%</tspan>
         </text>
       </g>
@@ -291,11 +316,11 @@ async function renderContributionChart(contributionDistribution, rankRingConfig)
 
     <!-- Date labels (first and last) -->
     <text x="0" y="${(chartHeight+2)*1.11}" text-anchor="start" class="label" font-size="4" opacity="0">
-      ${data[0].date}
+      ${escapeXml(data[0].date)}
       <animate attributeName="opacity" from="0" to="1" dur="0.2s" fill="freeze" begin="${config.contribution_distribution.global_display_time_delay}s"/>
     </text>
     <text x="${chartWidth+4}" y="${(chartHeight+2)*1.11}" class="label" text-anchor="end" font-size="4" opacity="0">
-      ${data[data.length - 1].date}
+      ${escapeXml(data[data.length - 1].date)}
       <animate attributeName="opacity" from="0" to="1" dur="0.2s" fill="freeze" begin="${config.contribution_distribution.global_display_time_delay + totalBarDisplayTime}s"/>
     </text>
 
@@ -312,6 +337,8 @@ async function renderContributionChart(contributionDistribution, rankRingConfig)
 }
 
 async function renderStats(stats) {
+
+  const escapedName = escapeXml(stats.name);
 
   const [
     githubUrl,
@@ -477,7 +504,7 @@ async function renderStats(stats) {
 
       <rect class="background" width="100%" height="100%" />
 
-      <text x="50" y="40" class="title" font-size="36">${stats.name}'s GitHub Stats</text>
+      <text x="50" y="40" class="title" font-size="36">${escapedName}&apos;s GitHub Stats</text>
 
       <clipPath id="clipPathReveal">
         <rect x="0" y="0" height="100" width="0">
@@ -486,7 +513,7 @@ async function renderStats(stats) {
         </rect>
       </clipPath>
 
-      <text x="${svg_width-20}" y="50" class="barcode" text-anchor="end" font-size="30" clip-path="url(#clipPathReveal)">${githubUrl}</text>
+      <text x="${svg_width-20}" y="50" class="barcode" text-anchor="end" font-size="30" clip-path="url(#clipPathReveal)">${escapeXml(githubUrl)}</text>
 
       <!-- Initial dot -->
       <circle cx="10" cy="60" r="4" fill="${elementsConfig.icon_color}">
@@ -701,7 +728,7 @@ async function renderStats(stats) {
       />
 
       <!-- Rank Ring Text -->
-      <text x="${rankRingConfig.rank_ring_center_x}" y="${rankRingConfig.rank_ring_center_y+Math.round(rankRingConfig.rank_ring_radius/6)}" class="rank-letter"  text-anchor="middle">${stats.rank.level}</text>
+      <text x="${rankRingConfig.rank_ring_center_x}" y="${rankRingConfig.rank_ring_center_y+Math.round(rankRingConfig.rank_ring_radius/6)}" class="rank-letter"  text-anchor="middle">${escapeXml(stats.rank.level)}</text>
       <text x="${rankRingConfig.rank_ring_center_x}" y="${rankRingConfig.rank_ring_center_y+Math.round(rankRingConfig.rank_ring_radius*2/3)-6}" class="rank-percentage" text-anchor="middle" dx="0.1em">${stats.rank.percentile.toFixed(1)}%</text>
 
       <!-- langauge ring center: image/gif/webp/whatever -->
@@ -773,5 +800,4 @@ async function renderStats(stats) {
   return svg;
 }
 
-export { renderStats as default };
-
+export { escapeXml, sanitizeHexColor, renderStats as default };

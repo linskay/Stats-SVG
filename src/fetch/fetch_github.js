@@ -2,38 +2,22 @@ import axios from 'axios';
 import 'dotenv/config';
 import { calculateLanguagePercentage } from '../utils/calculateLang.js';
 import { calculateRank } from '../utils/calculateRank.js';
+import { createTtlCache } from '../utils/cache.js';
 import config from '../../config.js';
 import pkg from 'http2-wrapper';
 import pLimit from 'p-limit';
 const { http2Adapter } = pkg;
 
+const { http2Adapter } = pkg;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const http2Axios = axios.create({
-  adapter: http2Adapter,
-});
+const http2Axios = axios.create({ adapter: http2Adapter });
 
 const GRAPHQL_QUERY_USER_INFO = `
   query userInfo($login: String!) {
     user(login: $login) {
       name
       login
-      createdAt
       followers {
-        totalCount
-      }
-      contributionsCollection {
-        totalCommitContributions
-        totalPullRequestContributions
-        totalPullRequestReviewContributions
-        totalIssueContributions
-      }
-      pullRequests(states: MERGED) {
-        totalCount
-      }
-      repositoryDiscussions {
-        totalCount
-      }
-      repositoryDiscussionComments(onlyAnswers: true) {
         totalCount
       }
     }
@@ -43,11 +27,7 @@ const GRAPHQL_QUERY_USER_INFO = `
 const GRAPHQL_QUERY_REPOSITORIES = `
   query userRepositories($login: String!, $after: String) {
     user(login: $login) {
-      repositoriesContributedTo(contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY], first: 100, includeUserRepositories: true) {
-        totalCount
-      }
-      repositories(first: 100, after: $after, ownerAffiliations: OWNER, isFork: false, orderBy: {field: CREATED_AT, direction: DESC}) {
-        totalCount
+      repositories(first: 100, after: $after, ownerAffiliations: OWNER, isFork: false, visibility: PUBLIC, orderBy: {field: CREATED_AT, direction: DESC}) {
         pageInfo {
           hasNextPage
           endCursor
@@ -110,22 +90,19 @@ const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
 async function fetchGitHubData(username) {
   console.log('Fetching data for', username);
+  // The API handler validates the login before calling this function.
+  const cacheKey = username.toLowerCase();
 
-  // Check if we have cached data
-  const cachedData = cache.get(username);
-  if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-    return cachedData.data;
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) {
+    return cachedData;
   }
 
   const url = 'https://api.github.com/graphql';
   const headers = {
-    'Authorization': `bearer ${GITHUB_TOKEN}`,
+    Authorization: `bearer ${GITHUB_TOKEN}`,
     'Content-Type': 'application/json'
   };
-
-  const now = new Date();
-  const fromDate = new Date(now);
-  fromDate.setDate(now.getDate() - config.contribution_distribution.days_to_show + 1);
 
   try {
     console.time('GitHub API calls');
@@ -136,122 +113,57 @@ async function fetchGitHubData(username) {
     };
 
     const fetchRepositories = async () => {
-      let allRepositories = [];
+      const allRepositories = [];
       let hasNextPage = true;
       let after = null;
-      let contributedToCount = 0;
 
       while (hasNextPage) {
-        const response = await http2Axios.post(url, { 
-          query: GRAPHQL_QUERY_REPOSITORIES, 
-          variables: { login: username, after } 
+        const response = await http2Axios.post(url, {
+          query: GRAPHQL_QUERY_REPOSITORIES,
+          variables: { login: username, after }
         }, { headers });
-
         const data = response.data?.data?.user;
+
         if (!data) {
           throw new Error('No user data returned from GitHub API');
         }
 
-        allRepositories = allRepositories.concat(data.repositories.nodes);
+        allRepositories.push(...data.repositories.nodes);
         hasNextPage = data.repositories.pageInfo.hasNextPage;
         after = data.repositories.pageInfo.endCursor;
-
-        // Only set this on the first iteration
-        if (contributedToCount === 0) {
-          contributedToCount = data.repositoriesContributedTo.totalCount;
-        }
       }
 
-      return { 
-        repositories: { nodes: allRepositories }, 
-        repositoriesContributedTo: { totalCount: contributedToCount }
-      };
+      return allRepositories;
     };
 
-    async function fetchContributionsCalendar(username, fromDate, toDate) {
-      const startDate = new Date(fromDate);
-      const endDate = new Date(toDate);
-
-      // Check if the date period is greater than 1 year
-      const isMoreThanOneYear = (endDate - startDate) > (365 * 24 * 60 * 60 * 1000);
-
-      if (isMoreThanOneYear) {
-        const promises = [];
-
-        // Separate the date range by year
-        for (let year = startDate.getFullYear(); year <= endDate.getFullYear(); year++) {
-          const yearStartDate = new Date(year, 0, 1); // January 1st of the current year
-          const yearEndDate = new Date(year, 11, 31); // December 31st of the current year
-
-          // Adjust the start and end dates if they fall outside the specified range
-          const from = yearStartDate < startDate ? startDate : yearStartDate;
-          const to = yearEndDate > endDate ? endDate : yearEndDate;
-
-          // Create a promise for the current year range
-          promises.push(fetchContributionsForYear(url, headers, username, from, to));
-        }
-
-        // Wait for all promises to resolve
-        const results = await Promise.all(promises);
-
-        // Combine results
-        const combinedResult = results.reduce((acc, curr) => {
-          for (const date in curr) {
-            if (!acc[date]) {
-              acc[date] = { total: 0 };
-            }
-            acc[date].total += curr[date].total;
-          }
-          return acc;
-        }, {});
-
-        // Log the length of the combined result
-        console.log(Object.keys(combinedResult).length);
-        return combinedResult;
-
-      } else {
-        // If the period is 1 year or less, run a normal query
-        return fetchContributionsForYear(url, headers, username, startDate, endDate);
-      }
-    }
-
-    const [userInfo, repositories, contributionsCalendar] = await Promise.all([
-      fetchUserInfo(),
-      fetchRepositories(),
-      fetchContributionsCalendar(username, fromDate, now)
-    ]);
-
+    const [userInfo, repositories] = await Promise.all([fetchUserInfo(), fetchRepositories()]);
     console.timeEnd('GitHub API calls');
 
     if (!userInfo) throw new Error(`User ${username} not found`);
 
-    // Fetch all-time contributions in parallel
-    console.time('Fetching all-time contributions');
-    const allTimeContributions = await fetchAllTimeContributions(url, headers, username, userInfo.createdAt);
-    console.timeEnd('Fetching all-time contributions');
-
     console.time('Data Processing');
-
     const stats = {
       login: userInfo.login,
       name: userInfo.name || userInfo.login,
       followers: userInfo.followers?.totalCount || 0,
-      total_commits: allTimeContributions.commits,
-      total_prs: allTimeContributions.prs,
-      total_prs_reviewed: allTimeContributions.reviews,
-      total_issues: allTimeContributions.issues,
-      total_merged_prs: userInfo.pullRequests?.totalCount || 0,
-      total_repos: repositories.repositories?.nodes?.length || 0,
-      total_stars: repositories.repositories?.nodes?.reduce((acc, repo) => acc + (repo.stargazers?.totalCount || 0), 0) || 0,
-      total_forks: repositories.repositories?.nodes?.reduce((acc, repo) => acc + (repo.forkCount || 0), 0) || 0,
-      total_contributes_to: repositories.repositoriesContributedTo?.totalCount || 0,
-      top_languages: calculateTopLanguages(repositories.repositories?.nodes || []),
-      total_discussions_started: userInfo.repositoryDiscussions?.totalCount || 0,
-      total_discussions_answered: userInfo.repositoryDiscussionComments?.totalCount || 0
+      // Contribution, pull-request, and discussion totals may include private activity.
+      // Do not query or expose them from this public endpoint.
+      total_commits: 0,
+      total_prs: 0,
+      total_prs_reviewed: 0,
+      total_issues: 0,
+      total_merged_prs: 0,
+      total_repos: repositories.length,
+      total_stars: repositories.reduce((acc, repo) => acc + (repo.stargazers?.totalCount || 0), 0),
+      total_forks: repositories.reduce((acc, repo) => acc + (repo.forkCount || 0), 0),
+      total_contributes_to: 0,
+      top_languages: calculateTopLanguages(repositories),
+      total_discussions_started: 0,
+      total_discussions_answered: 0,
+      contribution_distribution: {}
     };
 
-    stats.merged_prs_percentage = stats.total_prs ? Math.min((stats.total_merged_prs / stats.total_prs) * 100, 100) : 0;
-
+    stats.merged_prs_percentage = 0;
     stats.rank = calculateRank({
       all_commits: true,
       commits: stats.total_commits,
@@ -262,18 +174,13 @@ async function fetchGitHubData(username) {
       stars: stats.total_stars,
       followers: stats.followers
     });
-
     stats.language_percentages = calculateLanguagePercentage(stats.top_languages);
-
-    stats.contribution_distribution = await processContributionsCalendar(contributionsCalendar);
-
     console.timeEnd('Data Processing');
 
     // Cache the results
-    cache.set(username, { data: stats, timestamp: Date.now() });
+    cache.set(cacheKey, stats);
 
     return stats;
-
   } catch (error) {
     console.error('Error fetching data from GitHub:', error);
     throw error;

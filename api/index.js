@@ -1,4 +1,3 @@
-// Import necessary functions
 import fetchGitHubData from '../src/fetch/fetch_github.js';
 import fetchLeetCodeStats from '../src/fetch/fetch_leetcode.js';
 import fetchSteamStatus from '../src/fetch/fetch_steam.js';
@@ -83,8 +82,22 @@ export async function fetchWithRetry(fetcher, { label, deadlineMs = REQUEST_DEAD
   throw lastError;
 }
 
+const endpoints = {
+  '/api/github-status': { provider: 'github', fetcher: fetchGitHubData },
+  '/api/leetcode-status': { provider: 'leetcode', fetcher: fetchLeetCodeStats },
+  '/api/steam-status': { provider: 'steam', fetcher: fetchSteamStatus }
+};
+
 export default async function handler(req, res) {
-  const { username } = req.query;
+  const path = new URL(req.url, 'http://localhost').pathname;
+  const endpoint = endpoints[path];
+  if (!endpoint) return res.status(404).send('Not Found');
+
+  // Validation deliberately runs before retry logic and before a fetcher can call an external API.
+  const validationError = validateUsername(req.query?.username, endpoint.provider);
+  if (validationError) return res.status(400).json({ error: validationError });
+
+  if (!globalRateLimit(req, res) || !endpointRateLimits[endpoint.provider](req, res)) return;
 
   try {
     if (req.url.includes('github-status')) {
@@ -92,7 +105,6 @@ export default async function handler(req, res) {
       //console.log(stats);
       console.time('render stats');
       const svg = await renderStats(stats);
-      console.timeEnd('render stats');
       res.setHeader('Content-Type', 'image/svg+xml');
       console.time('send svg');
       res.send(svg);
@@ -114,15 +126,12 @@ export default async function handler(req, res) {
     } else {
       res.status(404).send('Not Found');
     }
-
+    return res.status(200).json(stats);
   } catch (error) {
     console.error('Error in handler:', error);
-    // Use error handling specific to your server framework
-    // For example, in Express.js:
-    if (error.response && error.response.status === 403) {
-      res.status(503).send('Service temporarily unavailable due to GitHub API rate limits. Please try again later.');
-    } else {
-      res.status(500).send('Error fetching data or rendering image');
+    if (error.response?.status === 403) {
+      return res.status(503).send('Service temporarily unavailable due to upstream API rate limits. Please try again later.');
     }
+    return res.status(500).send('Error fetching data or rendering image');
   }
 }

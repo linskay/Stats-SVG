@@ -1,11 +1,12 @@
 import axios from 'axios';
+import { createTtlCache } from '../utils/cache.js';
 
-// Add a simple in-memory cache
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 
 async function fetchLeetCodeStats(username) {
   const LEETCODE_API_ENDPOINT = 'https://leetcode.com/graphql';
+  // The API handler validates the username before calling this function.
+  const cacheKey = username.toLowerCase();
 
   const skill_query = `
     query skillStats($username: String!) {
@@ -94,10 +95,10 @@ async function fetchLeetCodeStats(username) {
   try {
 
     // Check if we have cached data
-    const cachedData = cache.get(username);
-    if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) {
         console.log('Returning cached data for', username);
-        return cachedData.data;
+        return cachedData;
     }
 
     console.time('leetcode API calls');
@@ -150,10 +151,28 @@ async function fetchLeetCodeStats(username) {
       }
     });
 
-    const user_data_extracted = user_data.data.data.matchedUser;
-    const skill_data_extracted = skill_data.data.data.matchedUser.tagProblemCounts;
-    const language_data_extracted = language_data.data.data.matchedUser.languageProblemCount;
-    const contest_data_extracted = contest_data.data.data.userContestRanking;
+    const user_data_extracted = user_data.data?.data?.matchedUser;
+    const skill_user = skill_data.data?.data?.matchedUser;
+    const language_user = language_data.data?.data?.matchedUser;
+
+    if (!user_data_extracted || !skill_user || !language_user) {
+      console.timeEnd('process leetcode data');
+      throw new NotFound(`LeetCode user ${username} not found`);
+    }
+
+    const skill_data_extracted = skill_user.tagProblemCounts;
+    const language_data_extracted = language_user.languageProblemCount;
+
+    if (!skill_data_extracted ||
+        !Array.isArray(skill_data_extracted.advanced) ||
+        !Array.isArray(skill_data_extracted.intermediate) ||
+        !Array.isArray(skill_data_extracted.fundamental) ||
+        !Array.isArray(language_data_extracted)) {
+      console.timeEnd('process leetcode data');
+      throw new Error('Incomplete LeetCode profile data received');
+    }
+
+    const contest_data_extracted = contest_data.data?.data?.userContestRanking;
 
     const leetcode_stats = {
         "username": user_data_extracted.username,
@@ -194,7 +213,7 @@ async function fetchLeetCodeStats(username) {
     console.timeEnd('process leetcode data');
 
     // Cache the result
-    cache.set(username, { data: leetcode_stats, timestamp: Date.now() });
+    cache.set(cacheKey, leetcode_stats);
 
     return leetcode_stats;
 
