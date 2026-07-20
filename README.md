@@ -27,6 +27,10 @@ npm run format:check
 
 Use `npm run format` to apply formatting changes.
 
+The repository automation, Conventional Commit format, release process, GitHub
+branch-protection settings, and Vercel setup are documented in
+[`docs/automation.md`](docs/automation.md).
+
 ## Deployment
 
 Since the GitHub API only allows 5k requests per hour, the api provided by this repo could possibly hit the rate limiter. You can host your own instance of this repo on Vercel to avoid the rate limiter.

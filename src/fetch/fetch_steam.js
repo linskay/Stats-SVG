@@ -5,23 +5,8 @@ import { createRequestDeadline, steamClient, upstreamRequest } from "./http.js";
 const steamApiBaseUrl = "https://api.steampowered.com/";
 const steamCDNBaseUrl =
   "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/";
-const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
-
-export const buildSteamApiUrl = (path, apiKey, parameters = {}) => {
-  const url = new URL(path, steamApiBaseUrl);
-  url.searchParams.set("key", apiKey);
-  url.searchParams.set("format", "json");
-  for (const [name, value] of Object.entries(parameters)) {
-    url.searchParams.set(name, value);
-  }
-  return url.toString();
-};
-
-function createNotFoundError(steamID) {
-  const error = new Error(`Steam profile ${steamID} not found`);
-  error.response = { status: 404 };
-  return error;
-}
+const cache = new Map();
+const CACHE_TTL = 2 * 60 * 1000;
 
 const fetchSteamStatus = async (steamID) => {
   const cachedData = cache.get(steamID);

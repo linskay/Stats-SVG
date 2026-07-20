@@ -9,6 +9,9 @@ import {
   upstreamRequest,
 } from "./http.js";
 import config from "../../config.js";
+import pkg from "http2-wrapper";
+const { http2Adapter } = pkg;
+const http2Axios = axios.create({ adapter: http2Adapter });
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GRAPHQL_QUERY_USER_INFO = `
@@ -27,9 +30,6 @@ const GRAPHQL_QUERY_USER_INFO = `
         totalCount
       }
       repositoryDiscussionComments {
-        totalCount
-      }
-      repositoriesContributedTo {
         totalCount
       }
     }
@@ -59,6 +59,9 @@ const GRAPHQL_QUERY_REPOSITORIES = `
             }
           }
         }
+      }
+      repositoriesContributedTo {
+        totalCount
       }
     }
   }
@@ -95,16 +98,16 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
   }
 `;
 
-const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
-const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
+// Add a bounded in-memory cache with a two-minute TTL.
+const cache = new Map();
+const CACHE_TTL = 2 * 60 * 1000;
 
 async function fetchGitHubData(username) {
   console.log("Fetching data for", username);
 
-  const cacheKey = `github:${username.trim().toLowerCase()}`;
-  const cachedData = cache.get(cacheKey);
-  if (cachedData) {
-    return cachedData;
+  const cachedData = cache.get(username);
+  if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
+    return cachedData.data;
   }
 
   const url = "https://api.github.com/graphql";
@@ -141,6 +144,7 @@ async function fetchGitHubData(username) {
 
     const fetchRepositories = async () => {
       const allRepositories = [];
+      let repositoriesContributedTo;
       let hasNextPage = true;
       let after = null;
 
@@ -157,11 +161,15 @@ async function fetchGitHubData(username) {
         }
 
         allRepositories.push(...data.repositories.nodes);
+        repositoriesContributedTo = data.repositoriesContributedTo;
         hasNextPage = data.repositories.pageInfo.hasNextPage;
         after = data.repositories.pageInfo.endCursor;
       }
 
-      return { repositories: { nodes: allRepositories } };
+      return {
+        repositories: { nodes: allRepositories },
+        repositoriesContributedTo,
+      };
     };
 
     async function fetchContributionsCalendar(username, fromDate, toDate) {
@@ -294,7 +302,7 @@ async function fetchGitHubData(username) {
     console.timeEnd("Data Processing");
 
     // Cache the results
-    cache.set(cacheKey, stats);
+    cache.set(username, { data: stats, timestamp: Date.now() });
 
     return stats;
   } catch (error) {

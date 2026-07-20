@@ -26,12 +26,7 @@ const DEFAULT_LANGUAGE_COLOR = "#cccccc";
 const CSS_HEX_COLOR_PATTERN =
   /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
 
-/**
- * Escapes a value before it is interpolated into SVG XML text content or an
- * attribute. Do not use this for values with a stricter expected format (such
- * as colors); validate those values instead.
- */
-export function escapeXml(value) {
+function escapeXml(value) {
   return String(value ?? "").replace(
     /[&<>"']/g,
     (character) =>
@@ -45,7 +40,7 @@ export function escapeXml(value) {
   );
 }
 
-export function sanitizeHexColor(color, fallback = DEFAULT_LANGUAGE_COLOR) {
+function sanitizeHexColor(color, fallback = DEFAULT_LANGUAGE_COLOR) {
   return typeof color === "string" && CSS_HEX_COLOR_PATTERN.test(color)
     ? color
     : fallback;
@@ -867,4 +862,4 @@ async function renderStats(stats) {
   return svg;
 }
 
-export { renderStats as default };
+export { escapeXml, sanitizeHexColor, renderStats as default };
