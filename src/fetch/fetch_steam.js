@@ -1,11 +1,12 @@
 import "dotenv/config";
-import { createTtlCache } from "../utils/cache.js";
+import { createSingleFlight, createTtlCache } from "../utils/cache.js";
 import { createRequestDeadline, steamClient, upstreamRequest } from "./http.js";
 
 const steamApiBaseUrl = "https://api.steampowered.com/";
 const steamCDNBaseUrl =
   "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/";
 const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
+const singleFlight = createSingleFlight();
 
 export const buildSteamApiUrl = (path, apiKey, parameters = {}) => {
   const url = new URL(path, steamApiBaseUrl);
@@ -23,8 +24,13 @@ function createNotFoundError(steamID) {
   return error;
 }
 
-const fetchSteamStatus = async (steamID) => {
-  const cachedData = cache.get(steamID);
+function getCacheKey(steamID) {
+  return `steam:${steamID.trim()}`;
+}
+
+const fetchSteamStatusUncached = async (steamID) => {
+  const cacheKey = getCacheKey(steamID);
+  const cachedData = cache.get(cacheKey);
   if (cachedData) return cachedData;
 
   const apiKey = process.env.STEAM_API_KEY;
@@ -155,11 +161,19 @@ const fetchSteamStatus = async (steamID) => {
               .filter((item) => Object.values(item)[0] > 0),
     };
 
-    cache.set(steamID, steamData);
+    cache.set(cacheKey, steamData);
     return steamData;
   } finally {
     deadline.dispose();
   }
 };
+
+function fetchSteamStatus(steamID) {
+  const cacheKey = getCacheKey(steamID);
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) return Promise.resolve(cachedData);
+
+  return singleFlight(cacheKey, () => fetchSteamStatusUncached(steamID));
+}
 
 export default fetchSteamStatus;

@@ -34,3 +34,31 @@ export function createTtlCache({ ttl, maxSize }) {
     },
   };
 }
+
+/**
+ * Deduplicates concurrent work for the same cache key.
+ *
+ * Completed requests are deliberately not retained here; callers should use a
+ * TTL cache for completed values. This map only covers the interval while an
+ * upstream request is in progress.
+ */
+export function createSingleFlight() {
+  const inFlight = new Map();
+
+  return function singleFlight(cacheKey, request) {
+    const existingRequest = inFlight.get(cacheKey);
+    if (existingRequest) return existingRequest;
+
+    const promise = (async () => {
+      try {
+        return await request();
+      } finally {
+        // Do not remove a newer request should the map be reused meanwhile.
+        if (inFlight.get(cacheKey) === promise) inFlight.delete(cacheKey);
+      }
+    })();
+
+    inFlight.set(cacheKey, promise);
+    return promise;
+  };
+}
