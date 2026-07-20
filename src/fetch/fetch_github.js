@@ -9,6 +9,7 @@ import {
   upstreamRequest,
 } from "./http.js";
 import config from "../../config.js";
+import NotFound from "../errors/not_found.js";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GRAPHQL_QUERY_USER_INFO = `
@@ -99,6 +100,72 @@ const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 const singleFlight = createSingleFlight();
 const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
+function graphqlErrorMessage(errors) {
+  return errors
+    .map((error) => error.message)
+    .filter(Boolean)
+    .join("; ");
+}
+
+function isRateLimitGraphqlError(errors) {
+  return errors.some(
+    (error) =>
+      error.type === "RATE_LIMITED" || /rate limit/i.test(error.message),
+  );
+}
+
+function isValidationGraphqlError(errors) {
+  return errors.some((error) =>
+    /validation|syntax|unknown argument|unknown field|variable/i.test(
+      `${error.type ?? ""} ${error.message ?? ""}`,
+    ),
+  );
+}
+
+function isTemporaryGraphqlError(errors) {
+  return errors.some((error) =>
+    /internal|temporary|service unavailable|something went wrong/i.test(
+      `${error.type ?? ""} ${error.message ?? ""}`,
+    ),
+  );
+}
+
+function isAuthorizationGraphqlError(errors) {
+  return errors.some((error) =>
+    /forbidden|unauthorized/i.test(
+      `${error.type ?? ""} ${error.message ?? ""}`,
+    ),
+  );
+}
+
+/**
+ * GitHub can return GraphQL failures with HTTP 200. Convert these responses
+ * to typed errors before callers consume partial response data.
+ */
+export function validateGitHubGraphqlResponse(response, username) {
+  const errors = response.data?.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
+    const message =
+      graphqlErrorMessage(errors) || "GitHub GraphQL request failed";
+    const status = isRateLimitGraphqlError(errors)
+      ? 429
+      : isValidationGraphqlError(errors)
+        ? 400
+        : isTemporaryGraphqlError(errors)
+          ? 503
+          : isAuthorizationGraphqlError(errors)
+            ? 403
+            : 502;
+    throw new UpstreamRequestError(message, { status, errors });
+  }
+
+  if (response.data?.data?.user === null) {
+    throw new NotFound(`GitHub user ${username} not found`);
+  }
+
+  return response;
+}
+
 function getCacheKey(username) {
   return `github:${username.trim().toLowerCase()}`;
 }
@@ -123,13 +190,15 @@ async function fetchGitHubDataUncached(username) {
   );
 
   const deadline = createRequestDeadline();
-  const request = (data) =>
-    upstreamRequest(
+  const request = async (data) => {
+    const response = await upstreamRequest(
       githubClient,
       { method: "post", url, data, headers },
       deadline,
       "GitHub API",
     );
+    return validateGitHubGraphqlResponse(response, username);
+  };
 
   try {
     console.time("GitHub API calls");
@@ -233,7 +302,7 @@ async function fetchGitHubDataUncached(username) {
 
     console.timeEnd("GitHub API calls");
 
-    if (!userInfo) throw new Error(`User ${username} not found`);
+    if (!userInfo) throw new NotFound(`GitHub user ${username} not found`);
 
     // Fetch all-time contributions in parallel
     console.time("Fetching all-time contributions");

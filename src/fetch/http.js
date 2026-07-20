@@ -8,11 +8,14 @@ export const REQUEST_DEADLINE_MS = 9_000;
 const UPSTREAM_TIMEOUT_MS = 7_000;
 
 export class UpstreamRequestError extends Error {
-  constructor(message, { status, cause } = {}) {
+  constructor(message, { status, cause, errors } = {}) {
     super(message, { cause });
     this.name = "UpstreamRequestError";
     this.status = status;
-    this.response = status ? { status } : undefined;
+    this.errors = errors;
+    this.response = status
+      ? { status, ...(errors ? { data: { errors } } : {}) }
+      : undefined;
   }
 }
 
