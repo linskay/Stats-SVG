@@ -3,102 +3,82 @@ import fetchLeetCodeStats from '../src/fetch/fetch_leetcode.js';
 import fetchSteamStatus from '../src/fetch/fetch_steam.js';
 import renderStats from '../src/render/render_github.js';
 
-const MINUTE = 60 * 1000;
+// Leave time to render and send the response before Vercel's 10-second maxDuration.
+const REQUEST_DEADLINE_MS = 8_500;
+const MAX_ATTEMPTS = 3;
+const BASE_RETRY_DELAY_MS = 250;
+const MAX_RETRY_DELAY_MS = 2_000;
+const RETRYABLE_SERVER_STATUSES = new Set([500, 502, 503, 504]);
 
-// Keep each provider's identifier rules explicit: they are not interchangeable.
-export const USERNAME_REQUIREMENTS = {
-  github: {
-    label: 'GitHub login',
-    minLength: 1,
-    maxLength: 39,
-    format: /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/
-  },
-  leetcode: {
-    label: 'LeetCode username',
-    minLength: 1,
-    maxLength: 30,
-    format: /^[A-Za-z0-9_-]+$/
-  },
-  steam: {
-    label: 'SteamID',
-    minLength: 17,
-    maxLength: 17,
-    format: /^7656119\d{10}$/
-  }
-};
+const sleep = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
-function validateUsername(username, provider) {
-  const requirement = USERNAME_REQUIREMENTS[provider];
+function deadlineError() {
+  const error = new Error('Request deadline exceeded before the upstream request completed');
+  error.code = 'DEADLINE_EXCEEDED';
+  return error;
+}
 
-  if (typeof username !== 'string' || username.length === 0) {
-    return `${requirement.label} is required and must be a string`;
+function runBeforeDeadline(fetcher, remaining) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(deadlineError()), remaining);
+  });
+
+  return Promise.race([fetcher(), timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function getProviderRetryDelay(error) {
+  const headers = error.response?.headers;
+  if (!headers) return null;
+
+  const retryAfter = headers['retry-after'];
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    const retryAt = Number.isFinite(seconds) ? Date.now() + seconds * 1_000 : Date.parse(retryAfter);
+    if (Number.isFinite(retryAt)) return Math.max(0, retryAt - Date.now());
   }
-  if (username.length < requirement.minLength || username.length > requirement.maxLength) {
-    return `${requirement.label} must be ${requirement.minLength}-${requirement.maxLength} characters long`;
+
+  // GitHub and several other providers expose the reset as Unix seconds.
+  const resetAt = Number(headers['x-ratelimit-reset']);
+  if (Number.isFinite(resetAt) && headers['x-ratelimit-remaining'] === '0') {
+    return Math.max(0, resetAt * 1_000 - Date.now());
   }
-  if (!requirement.format.test(username)) {
-    return `${requirement.label} has an invalid format`;
-  }
+
   return null;
 }
 
-function getClientIp(req) {
-  const forwarded = req.headers?.['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) return forwarded.split(',')[0].trim();
-  return req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+export function isRetryableError(error) {
+  const status = error.response?.status;
+  if (status !== undefined) return status === 429 || RETRYABLE_SERVER_STATUSES.has(status);
+
+  // Axios uses a missing response for connection, DNS and timeout failures.
+  return error.isAxiosError === true && Boolean(error.code || error.request);
 }
 
-/** A bounded, per-IP fixed-window rate-limit middleware. */
-function createRateLimiter({ windowMs, max, maxEntries = 10_000 }) {
-  const requests = new Map();
-
-  return (req, res) => {
-    const now = Date.now();
-    for (const [ip, state] of requests) {
-      if (state.resetAt <= now) requests.delete(ip);
-    }
-
-    const ip = getClientIp(req);
-    let state = requests.get(ip);
-    if (!state || state.resetAt <= now) state = { count: 0, resetAt: now + windowMs };
-
-    state.count += 1;
-    requests.delete(ip);
-    requests.set(ip, state);
-    while (requests.size > maxEntries) requests.delete(requests.keys().next().value);
-
-    const remaining = Math.max(0, max - state.count);
-    res.setHeader('X-RateLimit-Limit', String(max));
-    res.setHeader('X-RateLimit-Remaining', String(remaining));
-
-    if (state.count > max) {
-      const retryAfter = Math.ceil((state.resetAt - now) / 1000);
-      res.setHeader('Retry-After', String(retryAfter));
-      res.status(429).json({ error: 'Too many requests. Please try again later.' });
-      return false;
-    }
-    return true;
-  };
-}
-
-const globalRateLimit = createRateLimiter({ windowMs: MINUTE, max: 60 });
-const endpointRateLimits = {
-  github: createRateLimiter({ windowMs: MINUTE, max: 10 }),
-  leetcode: createRateLimiter({ windowMs: MINUTE, max: 20 }),
-  steam: createRateLimiter({ windowMs: MINUTE, max: 10 })
-};
-
-async function fetchWithRetry(fetcher, username, maxRetries = 5, retryDelay = 1000) {
+export async function fetchWithRetry(fetcher, { label, deadlineMs = REQUEST_DEADLINE_MS } = {}) {
+  const deadlineAt = Date.now() + deadlineMs;
   let lastError;
-  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw lastError || deadlineError();
+
     try {
-      return await fetcher(username);
+      return await runBeforeDeadline(fetcher, remaining);
     } catch (error) {
       lastError = error;
-      console.error(`Attempt ${attempt + 1} failed:`, error.message);
-      if (attempt < maxRetries - 1) await new Promise(resolve => setTimeout(resolve, retryDelay));
+      if (!isRetryableError(error) || attempt === MAX_ATTEMPTS) throw error;
+
+      const exponentialDelay = Math.min(BASE_RETRY_DELAY_MS * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
+      const jitteredDelay = Math.round(exponentialDelay * (0.5 + Math.random()));
+      const delay = Math.max(jitteredDelay, getProviderRetryDelay(error) || 0);
+      if (Date.now() + delay >= deadlineAt) throw error;
+
+      console.warn(`${label || 'Upstream request'} failed (attempt ${attempt}/${MAX_ATTEMPTS}); retrying in ${delay}ms`, error.message);
+      await sleep(delay);
     }
   }
+
   throw lastError;
 }
 
@@ -120,11 +100,31 @@ export default async function handler(req, res) {
   if (!globalRateLimit(req, res) || !endpointRateLimits[endpoint.provider](req, res)) return;
 
   try {
-    const stats = await fetchWithRetry(endpoint.fetcher, req.query.username);
-    if (endpoint.provider === 'github') {
+    if (req.url.includes('github-status')) {
+      const stats = await fetchWithRetry(() => fetchGitHubData(username), { label: 'GitHub request' });
+      //console.log(stats);
+      console.time('render stats');
       const svg = await renderStats(stats);
       res.setHeader('Content-Type', 'image/svg+xml');
-      return res.send(svg);
+      console.time('send svg');
+      res.send(svg);
+      console.timeEnd('send svg');
+
+    } else if (req.url.includes('leetcode-status')) {
+      console.time('fetch leetcode stats');
+      const stats = await fetchWithRetry(() => fetchLeetCodeStats(username), { label: 'LeetCode request' });
+      console.timeEnd('fetch leetcode stats');
+      console.log(stats);
+      res.status(200).json(stats);
+
+    } else if (req.url.includes('steam-status')) {
+      console.time('fetch steam status');
+      const stats = await fetchWithRetry(() => fetchSteamStatus(username), { label: 'Steam request' });
+      console.timeEnd('fetch steam status');
+      console.log(stats);
+      res.status(200).json(stats);
+    } else {
+      res.status(404).send('Not Found');
     }
     return res.status(200).json(stats);
   } catch (error) {

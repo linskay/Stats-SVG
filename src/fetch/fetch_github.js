@@ -5,6 +5,8 @@ import { calculateRank } from '../utils/calculateRank.js';
 import { createTtlCache } from '../utils/cache.js';
 import config from '../../config.js';
 import pkg from 'http2-wrapper';
+import pLimit from 'p-limit';
+const { http2Adapter } = pkg;
 
 const { http2Adapter } = pkg;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -81,7 +83,10 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
   }
 `;
 
-const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
+// Add a simple in-memory cache
+const cache = new Map();
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
 async function fetchGitHubData(username) {
   console.log('Fetching data for', username);
@@ -197,6 +202,132 @@ function calculateTopLanguages(reposNodes) {
   return Object.entries(languageCounts)
     .sort(([, a], [, b]) => b.size - a.size)
     .reduce((result, [key, value]) => ({ ...result, [key]: value }), {});
+}
+  
+// Process contributions calendar in date:{total:value}
+async function processContributionsCalendar(contributionsCollection) {
+  const result = {};
+
+  // Check if contributionsCollection is a valid object
+  if (contributionsCollection && typeof contributionsCollection === 'object') {
+    // Iterate over the keys (dates) in the contributionsCollection
+    for (const date in contributionsCollection) {
+      if (contributionsCollection.hasOwnProperty(date)) {
+        const total = contributionsCollection[date].total || 0; // Use 0 if total is undefined
+        result[date] = { total }; // Store the total contributions for the date
+      }
+    }
+  } else {
+    console.warn('Invalid contributionsCollection:', contributionsCollection);
+  }
+
+  return result;
+}
+
+async function fetchContributionsForYear(url, headers, username, fromDate, toDate) {
+  const response = await http2Axios.post(url, { 
+    query: GRAPHQL_QUERY_CONTRIBUTIONS_CALENDAR, 
+    variables: { login: username, from: fromDate.toISOString(), to: toDate.toISOString() } 
+  }, { headers });
+
+  const contributionsCollection = response.data?.data?.user?.contributionsCollection;
+  const result = {};
+
+  // Check if contributionsCollection and contributionCalendar exist
+  if (contributionsCollection && contributionsCollection.contributionCalendar) {
+    for (const week of contributionsCollection.contributionCalendar.weeks) {
+      for (const day of week.contributionDays) {
+        // Initialize the date entry if it doesn't exist
+        if (!result[day.date]) {
+          result[day.date] = { total: 0 }; // Initialize total contributions for the date
+        }
+        // Accumulate contributions for the date
+        result[day.date].total += day.contributionCount;
+      }
+    }
+  }
+
+  return result;
+}
+
+async function fetchAllTimeContributions(url, headers, username, userCreatedAt) {
+  const createdDate = new Date(userCreatedAt);
+  const currentDate = new Date();
+  
+  // GitHub's GraphQL API charges a separate query cost for every year. Keep this
+  // deliberately small instead of starting one request per account year at once.
+  const limit = pLimit(ALL_TIME_CONTRIBUTIONS_CONCURRENCY);
+  const requests = [];
+  
+  for (let year = createdDate.getFullYear(); year <= currentDate.getFullYear(); year++) {
+    // Calculate the start and end dates for each year
+    const yearStart = new Date(Math.max(
+      new Date(year, 0, 1).getTime(),
+      createdDate.getTime()
+    ));
+    
+    const yearEnd = new Date(Math.min(
+      new Date(year, 11, 31, 23, 59, 59).getTime(),
+      currentDate.getTime()
+    ));
+    
+    requests.push(limit(async () => {
+      const response = await http2Axios.post(url, {
+        query: GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR,
+        variables: {
+          login: username,
+          from: yearStart.toISOString(),
+          to: yearEnd.toISOString()
+        }
+      }, { headers });
+
+      if (response.data?.errors?.length) {
+        throw new Error(`GitHub GraphQL error for ${year}: ${response.data.errors[0].message}`);
+      }
+
+      const contributions = response.data?.data?.user?.contributionsCollection;
+      if (!contributions) {
+        throw new Error(`GitHub returned no contributions for ${year}`);
+      }
+
+      return {
+        commits: contributions.totalCommitContributions || 0,
+        prs: contributions.totalPullRequestContributions || 0,
+        reviews: contributions.totalPullRequestReviewContributions || 0,
+        issues: contributions.totalIssueContributions || 0
+      };
+    }));
+  }
+  
+  // Preserve usable data when an individual year fails, but never turn a wholly
+  // failed request into a convincing all-zero result.
+  const settledContributions = await Promise.allSettled(requests);
+  const failedYears = settledContributions.filter(({ status }) => status === 'rejected');
+  const yearlyContributions = settledContributions
+    .filter(({ status }) => status === 'fulfilled')
+    .map(({ value }) => value);
+
+  if (yearlyContributions.length === 0) {
+    throw new AggregateError(
+      failedYears.map(({ reason }) => reason),
+      'Unable to fetch all-time GitHub contributions'
+    );
+  }
+
+  if (failedYears.length > 0) {
+    console.warn(`Could not fetch contributions for ${failedYears.length} year(s); returning partial totals`);
+  }
+  
+  // Sum up all contributions
+  const totals = yearlyContributions.reduce((acc, year) => ({
+    commits: acc.commits + year.commits,
+    prs: acc.prs + year.prs,
+    reviews: acc.reviews + year.reviews,
+    issues: acc.issues + year.issues
+  }), { commits: 0, prs: 0, reviews: 0, issues: 0 });
+  
+  console.log(`Fetched contributions for ${yearlyContributions.length}/${requests.length} years with concurrency ${ALL_TIME_CONTRIBUTIONS_CONCURRENCY}`);
+  return totals;
 }
 
 export default fetchGitHubData;
