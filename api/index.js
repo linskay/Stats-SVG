@@ -1,9 +1,14 @@
-// Import necessary functions
 import fetchGitHubData from '../src/fetch/fetch_github.js';
 import fetchLeetCodeStats from '../src/fetch/fetch_leetcode.js';
 import fetchSteamStatus from '../src/fetch/fetch_steam.js';
 import renderStats from '../src/render/render_github.js';
 import { createRequestDeadline, UpstreamRequestError } from '../src/fetch/http.js';
+
+const endpoints = {
+  '/api/github-status': { provider: 'github', fetcher: fetchGitHubData },
+  '/api/leetcode-status': { provider: 'leetcode', fetcher: fetchLeetCodeStats },
+  '/api/steam-status': { provider: 'steam', fetcher: fetchSteamStatus }
+};
 
 export default async function handler(req, res) {
   const { username } = req.query;
@@ -40,7 +45,7 @@ export default async function handler(req, res) {
     } else {
       res.status(404).send('Not Found');
     }
-
+    return res.status(200).json(stats);
   } catch (error) {
     console.error('Error in handler:', error);
     // Use error handling specific to your server framework

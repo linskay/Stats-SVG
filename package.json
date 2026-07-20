@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node express.js",
+    "test": "node --test",
     "prepare": "husky"
   },
   "dependencies": {

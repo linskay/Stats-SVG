@@ -1,32 +1,18 @@
 import 'dotenv/config';
 import { calculateLanguagePercentage } from '../utils/calculateLang.js';
 import { calculateRank } from '../utils/calculateRank.js';
+import { createTtlCache } from '../utils/cache.js';
 import config from '../../config.js';
 import { githubClient, upstreamRequest } from './http.js';
 
+const { http2Adapter } = pkg;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GRAPHQL_QUERY_USER_INFO = `
   query userInfo($login: String!) {
     user(login: $login) {
       name
       login
-      createdAt
       followers {
-        totalCount
-      }
-      contributionsCollection {
-        totalCommitContributions
-        totalPullRequestContributions
-        totalPullRequestReviewContributions
-        totalIssueContributions
-      }
-      pullRequests(states: MERGED) {
-        totalCount
-      }
-      repositoryDiscussions {
-        totalCount
-      }
-      repositoryDiscussionComments(onlyAnswers: true) {
         totalCount
       }
     }
@@ -36,11 +22,7 @@ const GRAPHQL_QUERY_USER_INFO = `
 const GRAPHQL_QUERY_REPOSITORIES = `
   query userRepositories($login: String!, $after: String) {
     user(login: $login) {
-      repositoriesContributedTo(contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY], first: 100, includeUserRepositories: true) {
-        totalCount
-      }
-      repositories(first: 100, after: $after, ownerAffiliations: OWNER, isFork: false, orderBy: {field: CREATED_AT, direction: DESC}) {
-        totalCount
+      repositories(first: 100, after: $after, ownerAffiliations: OWNER, isFork: false, visibility: PUBLIC, orderBy: {field: CREATED_AT, direction: DESC}) {
         pageInfo {
           hasNextPage
           endCursor
@@ -99,25 +81,23 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
 // Add a simple in-memory cache
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
 async function fetchGitHubData(username, deadline) {
   console.log('Fetching data for', username);
+  // The API handler validates the login before calling this function.
+  const cacheKey = username.toLowerCase();
 
-  // Check if we have cached data
-  const cachedData = cache.get(username);
-  if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-    return cachedData.data;
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) {
+    return cachedData;
   }
 
   const url = 'https://api.github.com/graphql';
   const headers = {
-    'Authorization': `bearer ${GITHUB_TOKEN}`,
+    Authorization: `bearer ${GITHUB_TOKEN}`,
     'Content-Type': 'application/json'
   };
-
-  const now = new Date();
-  const fromDate = new Date(now);
-  fromDate.setDate(now.getDate() - config.contribution_distribution.days_to_show + 1);
 
   try {
     console.time('GitHub API calls');
@@ -128,10 +108,9 @@ async function fetchGitHubData(username, deadline) {
     };
 
     const fetchRepositories = async () => {
-      let allRepositories = [];
+      const allRepositories = [];
       let hasNextPage = true;
       let after = null;
-      let contributedToCount = 0;
 
       while (hasNextPage) {
         const response = await upstreamRequest(githubClient, { method: 'post', url, data: {
@@ -140,24 +119,17 @@ async function fetchGitHubData(username, deadline) {
         }, headers }, deadline, 'GitHub');
 
         const data = response.data?.data?.user;
+
         if (!data) {
           throw new Error('No user data returned from GitHub API');
         }
 
-        allRepositories = allRepositories.concat(data.repositories.nodes);
+        allRepositories.push(...data.repositories.nodes);
         hasNextPage = data.repositories.pageInfo.hasNextPage;
         after = data.repositories.pageInfo.endCursor;
-
-        // Only set this on the first iteration
-        if (contributedToCount === 0) {
-          contributedToCount = data.repositoriesContributedTo.totalCount;
-        }
       }
 
-      return { 
-        repositories: { nodes: allRepositories }, 
-        repositoriesContributedTo: { totalCount: contributedToCount }
-      };
+      return allRepositories;
     };
 
     async function fetchContributionsCalendar(username, fromDate, toDate) {
@@ -223,27 +195,28 @@ async function fetchGitHubData(username, deadline) {
     console.timeEnd('Fetching all-time contributions');
 
     console.time('Data Processing');
-
     const stats = {
       login: userInfo.login,
       name: userInfo.name || userInfo.login,
       followers: userInfo.followers?.totalCount || 0,
-      total_commits: allTimeContributions.commits,
-      total_prs: allTimeContributions.prs,
-      total_prs_reviewed: allTimeContributions.reviews,
-      total_issues: allTimeContributions.issues,
-      total_merged_prs: userInfo.pullRequests?.totalCount || 0,
-      total_repos: repositories.repositories?.nodes?.length || 0,
-      total_stars: repositories.repositories?.nodes?.reduce((acc, repo) => acc + (repo.stargazers?.totalCount || 0), 0) || 0,
-      total_forks: repositories.repositories?.nodes?.reduce((acc, repo) => acc + (repo.forkCount || 0), 0) || 0,
-      total_contributes_to: repositories.repositoriesContributedTo?.totalCount || 0,
-      top_languages: calculateTopLanguages(repositories.repositories?.nodes || []),
-      total_discussions_started: userInfo.repositoryDiscussions?.totalCount || 0,
-      total_discussions_answered: userInfo.repositoryDiscussionComments?.totalCount || 0
+      // Contribution, pull-request, and discussion totals may include private activity.
+      // Do not query or expose them from this public endpoint.
+      total_commits: 0,
+      total_prs: 0,
+      total_prs_reviewed: 0,
+      total_issues: 0,
+      total_merged_prs: 0,
+      total_repos: repositories.length,
+      total_stars: repositories.reduce((acc, repo) => acc + (repo.stargazers?.totalCount || 0), 0),
+      total_forks: repositories.reduce((acc, repo) => acc + (repo.forkCount || 0), 0),
+      total_contributes_to: 0,
+      top_languages: calculateTopLanguages(repositories),
+      total_discussions_started: 0,
+      total_discussions_answered: 0,
+      contribution_distribution: {}
     };
 
-    stats.merged_prs_percentage = stats.total_prs ? Math.min((stats.total_merged_prs / stats.total_prs) * 100, 100) : 0;
-
+    stats.merged_prs_percentage = 0;
     stats.rank = calculateRank({
       all_commits: true,
       commits: stats.total_commits,
@@ -254,18 +227,13 @@ async function fetchGitHubData(username, deadline) {
       stars: stats.total_stars,
       followers: stats.followers
     });
-
     stats.language_percentages = calculateLanguagePercentage(stats.top_languages);
-
-    stats.contribution_distribution = await processContributionsCalendar(contributionsCalendar);
-
     console.timeEnd('Data Processing');
 
     // Cache the results
-    cache.set(username, { data: stats, timestamp: Date.now() });
+    cache.set(cacheKey, stats);
 
     return stats;
-
   } catch (error) {
     console.error('Error fetching data from GitHub:', error);
     throw error;
@@ -339,8 +307,10 @@ async function fetchAllTimeContributions(url, headers, username, userCreatedAt, 
   const createdDate = new Date(userCreatedAt);
   const currentDate = new Date();
   
-  // Create an array of promises for each year
-  const promises = [];
+  // GitHub's GraphQL API charges a separate query cost for every year. Keep this
+  // deliberately small instead of starting one request per account year at once.
+  const limit = pLimit(ALL_TIME_CONTRIBUTIONS_CONCURRENCY);
+  const requests = [];
   
   for (let year = createdDate.getFullYear(); year <= currentDate.getFullYear(); year++) {
     // Calculate the start and end dates for each year
@@ -375,8 +345,24 @@ async function fetchAllTimeContributions(url, headers, username, userCreatedAt, 
     );
   }
   
-  // Execute all promises in parallel
-  const yearlyContributions = await Promise.all(promises);
+  // Preserve usable data when an individual year fails, but never turn a wholly
+  // failed request into a convincing all-zero result.
+  const settledContributions = await Promise.allSettled(requests);
+  const failedYears = settledContributions.filter(({ status }) => status === 'rejected');
+  const yearlyContributions = settledContributions
+    .filter(({ status }) => status === 'fulfilled')
+    .map(({ value }) => value);
+
+  if (yearlyContributions.length === 0) {
+    throw new AggregateError(
+      failedYears.map(({ reason }) => reason),
+      'Unable to fetch all-time GitHub contributions'
+    );
+  }
+
+  if (failedYears.length > 0) {
+    console.warn(`Could not fetch contributions for ${failedYears.length} year(s); returning partial totals`);
+  }
   
   // Sum up all contributions
   const totals = yearlyContributions.reduce((acc, year) => ({
@@ -386,7 +372,7 @@ async function fetchAllTimeContributions(url, headers, username, userCreatedAt, 
     issues: acc.issues + year.issues
   }), { commits: 0, prs: 0, reviews: 0, issues: 0 });
   
-  console.log(`Fetched contributions for ${promises.length} years in parallel`);
+  console.log(`Fetched contributions for ${yearlyContributions.length}/${requests.length} years with concurrency ${ALL_TIME_CONTRIBUTIONS_CONCURRENCY}`);
   return totals;
 }
 
