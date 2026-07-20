@@ -2,6 +2,7 @@ import axios from 'axios';
 import 'dotenv/config';
 import { calculateLanguagePercentage } from '../utils/calculateLang.js';
 import { calculateRank } from '../utils/calculateRank.js';
+import { createTtlCache } from '../utils/cache.js';
 import config from '../../config.js';
 import pkg from 'http2-wrapper';
 const { http2Adapter } = pkg;
@@ -102,17 +103,16 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
   }
 `;
 
-// Add a simple in-memory cache
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 
 async function fetchGitHubData(username) {
   console.log('Fetching data for', username);
+  // The API handler validates the login before calling this function.
+  const cacheKey = username.toLowerCase();
 
-  // Check if we have cached data
-  const cachedData = cache.get(username);
-  if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-    return cachedData.data;
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) {
+    return cachedData;
   }
 
   const url = 'https://api.github.com/graphql';
@@ -268,7 +268,7 @@ async function fetchGitHubData(username) {
     console.timeEnd('Data Processing');
 
     // Cache the results
-    cache.set(username, { data: stats, timestamp: Date.now() });
+    cache.set(cacheKey, stats);
 
     return stats;
 
