@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import renderStats from "../src/render/render_github.js";
 
-const maliciousText = '</text><script>alert("x")</script>';
+const maliciousText = `</text><script>alert("x"&')</script>`;
 
 function createStats(overrides = {}) {
   return {
@@ -40,7 +40,7 @@ function createStats(overrides = {}) {
 test("renderStats keeps hostile names and language labels as SVG text", async () => {
   const svg = await renderStats(createStats());
   const escapedText =
-    "&lt;/text&gt;&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;";
+    "&lt;/text&gt;&lt;script&gt;alert(&quot;x&quot;&amp;&apos;)&lt;/script&gt;";
 
   assert.match(
     svg,
@@ -53,7 +53,7 @@ test("renderStats keeps hostile names and language labels as SVG text", async ()
   );
 });
 
-test("renderStats only renders hex language colors", async () => {
+test("renderStats accepts only 3, 4, 6, and 8 digit hex language colors", async () => {
   const invalidColors = ["url(javascript:alert(1))", "red;fill:red", ""];
   const validColors = ["#abc", "#abcd", "#aabbcc", "#aabbccdd"];
   const language_percentages = [...invalidColors, ...validColors].map(
@@ -75,8 +75,13 @@ test("renderStats only renders hex language colors", async () => {
     (svg.match(/stroke="#cccccc"/g) ?? []).length,
     invalidColors.length,
   );
+  assert.equal(
+    (svg.match(/fill="#cccccc"/g) ?? []).length,
+    invalidColors.length,
+  );
 
   for (const color of validColors) {
     assert.match(svg, new RegExp(`stroke="${color}"`));
+    assert.match(svg, new RegExp(`fill="${color}"`));
   }
 });
