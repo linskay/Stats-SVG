@@ -2,6 +2,18 @@ import 'dotenv/config';
 import axios from 'axios';
 
 const steamCDNBaseUrl = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/';
+const steamApiBaseUrl = 'https://api.steampowered.com/';
+
+const buildSteamApiUrl = (path, apiKey, parameters = {}) => {
+    const url = new URL(path, steamApiBaseUrl);
+    url.search = new URLSearchParams({
+        key: apiKey,
+        format: 'json',
+        ...parameters
+    });
+
+    return url.toString();
+};
 
 // Add a simple in-memory cache
 const cache = new Map();
@@ -9,11 +21,14 @@ const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 const fetchSteamStatus = async (steamID) => {
     const apiKey = process.env.STEAM_API_KEY; // Load API key from .env
-    const userProfileUrl = `http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${apiKey}&steamids=${steamID}&format=json`;
-    const recentGamesUrl = `http://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key=${apiKey}&steamid=${steamID}&format=json`;
-    const ownedGamesUrl = `http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${apiKey}&steamid=${steamID}&format=json&include_played_free_games=true`;
-    const badgesUrl = `https://api.steampowered.com/IPlayerService/GetBadges/v1/?key=${apiKey}&steamid=${steamID}&format=json`;
-    const animatedAvatarUrl = `https://api.steampowered.com/IPlayerService/GetAnimatedAvatar/v1/?key=${apiKey}&steamid=${steamID}&format=json`;
+    const userProfileUrl = buildSteamApiUrl('ISteamUser/GetPlayerSummaries/v0002/', apiKey, { steamids: steamID });
+    const recentGamesUrl = buildSteamApiUrl('IPlayerService/GetRecentlyPlayedGames/v0001/', apiKey, { steamid: steamID });
+    const ownedGamesUrl = buildSteamApiUrl('IPlayerService/GetOwnedGames/v0001/', apiKey, {
+        steamid: steamID,
+        include_played_free_games: 'true'
+    });
+    const badgesUrl = buildSteamApiUrl('IPlayerService/GetBadges/v1/', apiKey, { steamid: steamID });
+    const animatedAvatarUrl = buildSteamApiUrl('IPlayerService/GetAnimatedAvatar/v1/', apiKey, { steamid: steamID });
 
     try {
         // Check if we have cached data
