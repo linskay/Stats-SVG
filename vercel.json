@@ -15,6 +15,14 @@
     {
       "source": "/api/github-status",
       "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/leetcode-status",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/api/steam-status",
+      "destination": "/api/index.js"
     }
   ],
   "headers": [

@@ -64,38 +64,53 @@ async function fetchSteamStatusWithRetry(username, maxRetries = 5, retryDelay = 
   throw lastError;
 }
 
+function getAction(req) {
+  if (typeof req.params?.action === 'string') {
+    return req.params.action;
+  }
+
+  const pathname = new URL(req.url, 'http://localhost').pathname.replace(/\/+$/, '') || '/';
+  const match = /^\/api\/([^/]+)$/.exec(pathname);
+  return match?.[1];
+}
+
+const endpointHandlers = {
+  'github-status': async (username, res) => {
+    const stats = await fetchGitHubDataWithRetry(username);
+    console.time('render stats');
+    const svg = await renderStats(stats);
+    console.timeEnd('render stats');
+    res.setHeader('Content-Type', 'image/svg+xml');
+    console.time('send svg');
+    res.send(svg);
+    console.timeEnd('send svg');
+  },
+  'leetcode-status': async (username, res) => {
+    console.time('fetch leetcode stats');
+    const stats = await fetchLeetCodeStatsWithRetry(username);
+    console.timeEnd('fetch leetcode stats');
+    console.log(stats);
+    res.status(200).json(stats);
+  },
+  'steam-status': async (username, res) => {
+    console.time('fetch steam status');
+    const stats = await fetchSteamStatusWithRetry(username);
+    console.timeEnd('fetch steam status');
+    console.log(stats);
+    res.status(200).json(stats);
+  },
+};
+
 export default async function handler(req, res) {
   const { username } = req.query;
+  const endpointHandler = endpointHandlers[getAction(req)];
+
+  if (!endpointHandler) {
+    return res.status(404).send('Not Found');
+  }
 
   try {
-    if (req.url.includes('github-status')) {
-      const stats = await fetchGitHubDataWithRetry(username);
-      //console.log(stats);
-      console.time('render stats');
-      const svg = await renderStats(stats);
-      console.timeEnd('render stats');
-      res.setHeader('Content-Type', 'image/svg+xml');
-      console.time('send svg');
-      res.send(svg);
-      console.timeEnd('send svg');
-
-    } else if (req.url.includes('leetcode-status')) {
-      console.time('fetch leetcode stats');
-      const stats = await fetchLeetCodeStatsWithRetry(username);
-      console.timeEnd('fetch leetcode stats');
-      console.log(stats);
-      res.status(200).json(stats);
-
-    } else if (req.url.includes('steam-status')) {
-      console.time('fetch steam status');
-      const stats = await fetchSteamStatusWithRetry(username);
-      console.timeEnd('fetch steam status');
-      console.log(stats);
-      res.status(200).json(stats);
-    } else {
-      res.status(404).send('Not Found');
-    }
-
+    await endpointHandler(username, res);
   } catch (error) {
     console.error('Error in handler:', error);
     // Use error handling specific to your server framework
