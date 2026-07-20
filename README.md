@@ -133,12 +133,19 @@ The local server exposes the following endpoints. Each endpoint requires the `us
 
 All three data fetchers keep successful results in an in-memory cache for two minutes. Requests without a valid `username` value, unknown routes, or upstream API failures are not successful responses.
 
+### Rate limits
+
+The local Express server applies separate per-IP fixed-window limits: GitHub has 60 requests per minute, LeetCode has 30, and Steam has 20. Exceeded requests return `429 Too Many Requests` with `Retry-After` and do not call the upstream provider.
+
+On Vercel production deployments the same endpoint-specific limits are counted atomically in Vercel KV or Upstash Redis, so they are shared by all serverless instances. Configure `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the compatible `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`) before deploying; production deliberately does not fall back to an in-memory limiter.
+
 ### Environment variables
 
 | Variable        | Required for         | Purpose                                                                                                                                                                                        |
 | --------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GITHUB_TOKEN`  | `/api/github-status` | Authenticates requests to the GitHub GraphQL API. For a public deployment, it must be a dedicated least-privileged token with no access to private repositories or other private account data. |
 | `STEAM_API_KEY` | `/api/steam-status`  | Authenticates requests to the Steam Web API.                                                                                                                                                   |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel production | Vercel KV or Upstash Redis REST credentials for distributed rate limiting. |
 
 `/api/leetcode-status` does not require an environment variable: it queries LeetCode's public GraphQL endpoint. Set the variables in the deployment platform's environment-variable settings (or in a local `.env` file); never commit their values to the repository.
 
