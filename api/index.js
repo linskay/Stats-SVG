@@ -1,31 +1,120 @@
 import fetchGitHubData from "../src/fetch/fetch_github.js";
 import fetchLeetCodeStats from "../src/fetch/fetch_leetcode.js";
 import fetchSteamStatus from "../src/fetch/fetch_steam.js";
+import { REQUEST_DEADLINE_MS } from "../src/fetch/http.js";
 import renderStats from "../src/render/render_github.js";
 
 const USERNAME_PATTERN = /^[A-Za-z0-9-]{1,39}$/;
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNABORTED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EAI_AGAIN",
+  "ENETDOWN",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EPIPE",
+  "ERR_NETWORK",
+  "ETIMEDOUT",
+]);
+const DEFAULT_MAX_RETRY_DELAY_MS = 8_000;
+
+function upstreamStatus(error) {
+  return error?.status ?? error?.response?.status;
+}
+
+function hasGraphqlValidationErrors(error) {
+  const errors = error?.response?.data?.errors ?? error?.errors;
+  return Array.isArray(errors) && errors.length > 0;
+}
+
+export function isRetryableError(error) {
+  if (!error || hasGraphqlValidationErrors(error)) return false;
+
+  const status = upstreamStatus(error);
+  if (status !== undefined) return RETRYABLE_STATUSES.has(status);
+
+  return (
+    NETWORK_ERROR_CODES.has(error.code) ||
+    (error.isAxiosError === true && Boolean(error.request))
+  );
+}
+
+function retryAfterMs(error, now = Date.now()) {
+  const headers = error?.response?.headers;
+  const retryAfter = headers?.get?.("retry-after") ?? headers?.["retry-after"];
+  if (typeof retryAfter !== "string" && typeof retryAfter !== "number") {
+    return undefined;
+  }
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+
+  const retryAt = Date.parse(retryAfter);
+  return Number.isNaN(retryAt) ? undefined : Math.max(0, retryAt - now);
+}
+
+function retryDelayMs(error, attempt, retryDelay, maxRetryDelay, random) {
+  const upstreamDelay = retryAfterMs(error);
+  if (upstreamDelay !== undefined) return upstreamDelay;
+
+  const exponentialDelay = Math.min(maxRetryDelay, retryDelay * 2 ** attempt);
+  return Math.floor(exponentialDelay * (0.5 + random() * 0.5));
+}
+
+function deadlineExceededError(cause) {
+  const error = new Error("Request retry deadline exceeded", { cause });
+  error.code = "DEADLINE_EXCEEDED";
+  error.status = 504;
+  return error;
+}
 
 function validateUsername(username) {
   return typeof username === "string" && USERNAME_PATTERN.test(username);
 }
 
-async function fetchWithRetry(fetcher, username, maxRetries, retryDelay) {
+async function fetchWithRetry(
+  fetcher,
+  username,
+  maxRetries,
+  retryDelay,
+  {
+    deadlineMs = REQUEST_DEADLINE_MS,
+    maxRetryDelay = DEFAULT_MAX_RETRY_DELAY_MS,
+    sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay)),
+    random = Math.random,
+  } = {},
+) {
   let lastError;
+  const deadline = Date.now() + deadlineMs;
   for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    if (Date.now() >= deadline) throw deadlineExceededError(lastError);
     try {
       return await fetcher(username);
     } catch (error) {
       lastError = error;
-      if (attempt < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, retryDelay));
-      }
+      if (!isRetryableError(error) || attempt === maxRetries - 1) break;
+
+      const delay = retryDelayMs(
+        error,
+        attempt,
+        retryDelay,
+        maxRetryDelay,
+        random,
+      );
+      if (Date.now() + delay >= deadline) throw deadlineExceededError(error);
+      await sleep(delay);
     }
   }
   throw lastError;
 }
 
 function sendUpstreamError(res, error) {
-  const status = error.status ?? error.response?.status;
+  const status = upstreamStatus(error);
+  if (error?.code === "DEADLINE_EXCEEDED" || status === 504) {
+    return res.status(504).send("Upstream service temporarily unavailable");
+  }
   if (status === 404) {
     return res.status(404).send("User not found");
   }
@@ -52,7 +141,12 @@ export function createHandler({
   renderer = renderStats,
   maxRetries = 5,
   retryDelay = 1000,
+  deadlineMs = REQUEST_DEADLINE_MS,
+  maxRetryDelay = DEFAULT_MAX_RETRY_DELAY_MS,
+  sleep,
+  random,
 } = {}) {
+  const retryOptions = { deadlineMs, maxRetryDelay, sleep, random };
   return async function handler(req, res) {
     const action =
       req.params?.action ??
@@ -77,6 +171,7 @@ export function createHandler({
           username,
           maxRetries,
           retryDelay,
+          retryOptions,
         );
         const svg = await renderer(stats);
         res.setHeader("Content-Type", "image/svg+xml");
@@ -88,6 +183,7 @@ export function createHandler({
           username,
           maxRetries,
           retryDelay,
+          retryOptions,
         );
         return res.status(200).json(stats);
       }
@@ -97,6 +193,7 @@ export function createHandler({
           username,
           maxRetries,
           retryDelay,
+          retryOptions,
         );
         return res.status(200).json(stats);
       }
@@ -108,5 +205,5 @@ export function createHandler({
   };
 }
 
-export { validateUsername };
+export { fetchWithRetry, sendUpstreamError, validateUsername };
 export default createHandler();
