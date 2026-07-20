@@ -23,6 +23,30 @@ const fontsBase64 = JSON.parse(
   fs.readFileSync(path.join(__dirname, "../asset/fontsBase64.json"), "utf8"),
 );
 
+const DEFAULT_LANGUAGE_COLOR = '#cccccc';
+const CSS_HEX_COLOR_PATTERN = /^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i;
+
+/**
+ * Escapes a value before it is interpolated into SVG XML text content or an
+ * attribute. Do not use this for values with a stricter expected format (such
+ * as colors); validate those values instead.
+ */
+function escapeXml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;',
+  })[character]);
+}
+
+function sanitizeHexColor(color, fallback = DEFAULT_LANGUAGE_COLOR) {
+  return typeof color === 'string' && CSS_HEX_COLOR_PATTERN.test(color)
+    ? color
+    : fallback;
+}
+
 function darkenHexColor(hex, darkenFactor) {
   let r = parseInt(hex.slice(1, 3), 16);
   let g = parseInt(hex.slice(3, 5), 16);
@@ -51,7 +75,7 @@ function convertNumberUnit(number) {
 }
 
 async function calculateGithubUrl(stats) {
-  return `https://github.com/${stats.login}`;
+  return `https://github.com/${encodeURIComponent(String(stats.login ?? ''))}`;
 }
 
 async function calculateSvgConfig(config) {
