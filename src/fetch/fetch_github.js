@@ -4,6 +4,7 @@ import { calculateLanguagePercentage } from '../utils/calculateLang.js';
 import { calculateRank } from '../utils/calculateRank.js';
 import config from '../../config.js';
 import pkg from 'http2-wrapper';
+import pLimit from 'p-limit';
 const { http2Adapter } = pkg;
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -105,6 +106,7 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
 // Add a simple in-memory cache
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
 async function fetchGitHubData(username) {
   console.log('Fetching data for', username);
@@ -345,8 +347,10 @@ async function fetchAllTimeContributions(url, headers, username, userCreatedAt) 
   const createdDate = new Date(userCreatedAt);
   const currentDate = new Date();
   
-  // Create an array of promises for each year
-  const promises = [];
+  // GitHub's GraphQL API charges a separate query cost for every year. Keep this
+  // deliberately small instead of starting one request per account year at once.
+  const limit = pLimit(ALL_TIME_CONTRIBUTIONS_CONCURRENCY);
+  const requests = [];
   
   for (let year = createdDate.getFullYear(); year <= currentDate.getFullYear(); year++) {
     // Calculate the start and end dates for each year
@@ -360,29 +364,52 @@ async function fetchAllTimeContributions(url, headers, username, userCreatedAt) 
       currentDate.getTime()
     ));
     
-    // Create a promise for fetching this year's contributions
-    promises.push(
-      http2Axios.post(url, {
+    requests.push(limit(async () => {
+      const response = await http2Axios.post(url, {
         query: GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR,
         variables: {
           login: username,
           from: yearStart.toISOString(),
           to: yearEnd.toISOString()
         }
-      }, { headers }).then(response => {
-        const contributions = response.data?.data?.user?.contributionsCollection;
-        return {
-          commits: contributions?.totalCommitContributions || 0,
-          prs: contributions?.totalPullRequestContributions || 0,
-          reviews: contributions?.totalPullRequestReviewContributions || 0,
-          issues: contributions?.totalIssueContributions || 0
-        };
-      })
-    );
+      }, { headers });
+
+      if (response.data?.errors?.length) {
+        throw new Error(`GitHub GraphQL error for ${year}: ${response.data.errors[0].message}`);
+      }
+
+      const contributions = response.data?.data?.user?.contributionsCollection;
+      if (!contributions) {
+        throw new Error(`GitHub returned no contributions for ${year}`);
+      }
+
+      return {
+        commits: contributions.totalCommitContributions || 0,
+        prs: contributions.totalPullRequestContributions || 0,
+        reviews: contributions.totalPullRequestReviewContributions || 0,
+        issues: contributions.totalIssueContributions || 0
+      };
+    }));
   }
   
-  // Execute all promises in parallel
-  const yearlyContributions = await Promise.all(promises);
+  // Preserve usable data when an individual year fails, but never turn a wholly
+  // failed request into a convincing all-zero result.
+  const settledContributions = await Promise.allSettled(requests);
+  const failedYears = settledContributions.filter(({ status }) => status === 'rejected');
+  const yearlyContributions = settledContributions
+    .filter(({ status }) => status === 'fulfilled')
+    .map(({ value }) => value);
+
+  if (yearlyContributions.length === 0) {
+    throw new AggregateError(
+      failedYears.map(({ reason }) => reason),
+      'Unable to fetch all-time GitHub contributions'
+    );
+  }
+
+  if (failedYears.length > 0) {
+    console.warn(`Could not fetch contributions for ${failedYears.length} year(s); returning partial totals`);
+  }
   
   // Sum up all contributions
   const totals = yearlyContributions.reduce((acc, year) => ({
@@ -392,7 +419,7 @@ async function fetchAllTimeContributions(url, headers, username, userCreatedAt) 
     issues: acc.issues + year.issues
   }), { commits: 0, prs: 0, reviews: 0, issues: 0 });
   
-  console.log(`Fetched contributions for ${promises.length} years in parallel`);
+  console.log(`Fetched contributions for ${yearlyContributions.length}/${requests.length} years with concurrency ${ALL_TIME_CONTRIBUTIONS_CONCURRENCY}`);
   return totals;
 }
 
