@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
+const cache = new Map();
+const CACHE_TTL = 2 * 60 * 1000;
 
 async function fetchLeetCodeStats(username) {
   const LEETCODE_API_ENDPOINT = "https://leetcode.com/graphql";
@@ -217,7 +218,7 @@ async function fetchLeetCodeStats(username) {
     console.timeEnd("process leetcode data");
 
     // Cache the result
-    cache.set(cacheKey, leetcode_stats);
+    cache.set(username, { data: leetcode_stats, timestamp: Date.now() });
 
     return leetcode_stats;
   } catch (error) {

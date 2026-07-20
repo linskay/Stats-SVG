@@ -27,6 +27,10 @@ npm run format:check
 
 Use `npm run format` to apply formatting changes.
 
+The repository automation, Conventional Commit format, release process, GitHub
+branch-protection settings, and Vercel setup are documented in
+[`docs/automation.md`](docs/automation.md).
+
 ## Deployment
 
 Since the GitHub API only allows 5k requests per hour, the api provided by this repo could possibly hit the rate limiter. You can host your own instance of this repo on Vercel to avoid the rate limiter.
@@ -79,11 +83,11 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
 All endpoints accept a required `username` query parameter. Replace
 `your-project.vercel.app` with the domain of your Vercel deployment.
 
-| Endpoint | Response | Required configuration |
-| --- | --- | --- |
-| `/api/github-status` | GitHub statistics as an SVG image. | `GITHUB_TOKEN` |
-| `/api/leetcode-status` | LeetCode profile, skill, language, and contest statistics as JSON. | None |
-| `/api/steam-status` | Steam profile and game-play statistics as JSON. | `STEAM_API_KEY` |
+| Endpoint               | Response                                                           | Required configuration |
+| ---------------------- | ------------------------------------------------------------------ | ---------------------- |
+| `/api/github-status`   | GitHub statistics as an SVG image.                                 | `GITHUB_TOKEN`         |
+| `/api/leetcode-status` | LeetCode profile, skill, language, and contest statistics as JSON. | None                   |
+| `/api/steam-status`    | Steam profile and game-play statistics as JSON.                    | `STEAM_API_KEY`        |
 
 ### GitHub statistics
 
@@ -121,20 +125,20 @@ For Steam, `username` must be the user's numeric SteamID. Set `STEAM_API_KEY` in
 
 The local server exposes the following endpoints. Each endpoint requires the `username` query parameter. For Steam, `username` must be the numeric Steam ID used by the Steam Web API.
 
-| Endpoint | Required parameter | Response |
-| --- | --- | --- |
-| `/api/github-status?username=GITHUB_LOGIN` | GitHub login | An `image/svg+xml` GitHub statistics card. It is rendered from GitHub profile, contribution, repository, language, and rank data. |
-| `/api/leetcode-status?username=LEETCODE_LOGIN` | LeetCode username | A JSON object containing the username, solved-problem skill groups, languages, and contest statistics. It does not render an SVG. |
-| `/api/steam-status?username=STEAM_ID` | Numeric Steam ID | A JSON object containing the Steam profile, status, recent and owned games, level, and playtime totals and platform percentages. It does not render an SVG. |
+| Endpoint                                       | Required parameter | Response                                                                                                                                                    |
+| ---------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/github-status?username=GITHUB_LOGIN`     | GitHub login       | An `image/svg+xml` GitHub statistics card. It is rendered from GitHub profile, contribution, repository, language, and rank data.                           |
+| `/api/leetcode-status?username=LEETCODE_LOGIN` | LeetCode username  | A JSON object containing the username, solved-problem skill groups, languages, and contest statistics. It does not render an SVG.                           |
+| `/api/steam-status?username=STEAM_ID`          | Numeric Steam ID   | A JSON object containing the Steam profile, status, recent and owned games, level, and playtime totals and platform percentages. It does not render an SVG. |
 
 All three data fetchers keep successful results in an in-memory cache for two minutes. Requests without a valid `username` value, unknown routes, or upstream API failures are not successful responses.
 
 ### Environment variables
 
-| Variable | Required for | Purpose |
-| --- | --- | --- |
-| `GITHUB_TOKEN` | `/api/github-status` | Authenticates requests to the GitHub GraphQL API. For a public deployment, it must be a dedicated least-privileged token with no access to private repositories or other private account data. |
-| `STEAM_API_KEY` | `/api/steam-status` | Authenticates requests to the Steam Web API. |
+| Variable        | Required for         | Purpose                                                                                                                                                                                        |
+| --------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN`  | `/api/github-status` | Authenticates requests to the GitHub GraphQL API. For a public deployment, it must be a dedicated least-privileged token with no access to private repositories or other private account data. |
+| `STEAM_API_KEY` | `/api/steam-status`  | Authenticates requests to the Steam Web API.                                                                                                                                                   |
 
 `/api/leetcode-status` does not require an environment variable: it queries LeetCode's public GraphQL endpoint. Set the variables in the deployment platform's environment-variable settings (or in a local `.env` file); never commit their values to the repository.
 

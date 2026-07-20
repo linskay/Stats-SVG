@@ -3,14 +3,8 @@ import axios from "axios";
 
 const steamCDNBaseUrl =
   "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/";
-
-const buildSteamApiUrl = (path, apiKey, parameters = {}) => {
-    const url = new URL(path, steamApiBaseUrl);
-    url.search = new URLSearchParams({
-        key: apiKey,
-        format: 'json',
-        ...parameters
-    });
+const cache = new Map();
+const CACHE_TTL = 2 * 60 * 1000;
 
 const fetchSteamStatus = async (steamID) => {
   const apiKey = process.env.STEAM_API_KEY; // Load API key from .env

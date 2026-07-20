@@ -1,0 +1,21 @@
+name: Vercel deployment smoke test
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  deployments: read
+
+jobs:
+  smoke-test:
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check production endpoint
+        run: >-
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors
+          --max-time 20
+          "${{ github.event.deployment_status.target_url }}/api/leetcode-status?username=leetcode"
