@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,6 +25,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - uses: cycjimmy/semantic-release-action@v5
+      - name: Publish release
+        if: github.event_name == 'push'
+        run: npx --no-install semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate release configuration
+        if: github.event_name == 'workflow_dispatch'
+        run: npx --no-install semantic-release --dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
