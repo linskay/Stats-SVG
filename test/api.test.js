@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHandler, validateUsername } from "../api/index.js";
+import {
+  createHandler,
+  isRetryableError,
+  validateUsername,
+} from "../api/index.js";
+import { UpstreamRequestError } from "../src/fetch/http.js";
 
 function response() {
   return {
@@ -74,4 +79,138 @@ test("returns 404 for a missing upstream user and 502 for an upstream failure", 
     [second.statusCode, second.body],
     [502, "Upstream service error"],
   );
+});
+
+test("returns 503 for a temporary upstream timeout", async () => {
+  const handler = createHandler({
+    githubFetcher: async () => {
+      throw new UpstreamRequestError("GitHub API is temporarily unavailable", {
+        status: 503,
+      });
+    },
+    maxRetries: 1,
+  });
+  const res = response();
+
+  await handler(
+    { params: { action: "github-status" }, query: { username: "octocat" } },
+    res,
+  );
+
+  assert.deepEqual(
+    [res.statusCode, res.body],
+    [503, "Upstream service temporarily unavailable"],
+  );
+});
+
+test("does not retry non-retryable 400 and 404 upstream responses", async () => {
+  for (const status of [400, 404]) {
+    let calls = 0;
+    const handler = createHandler({
+      githubFetcher: async () => {
+        calls += 1;
+        throw { response: { status } };
+      },
+      maxRetries: 4,
+      retryDelay: 0,
+    });
+    const res = response();
+
+    await handler(
+      { params: { action: "github-status" }, query: { username: "octocat" } },
+      res,
+    );
+
+    assert.equal(calls, 1, `status ${status} must not be retried`);
+  }
+});
+
+test("retries retryable 503 and 429 responses only up to the configured limit", async () => {
+  for (const status of [503, 429]) {
+    let calls = 0;
+    const delays = [];
+    const handler = createHandler({
+      githubFetcher: async () => {
+        calls += 1;
+        throw { response: { status } };
+      },
+      maxRetries: 3,
+      retryDelay: 10,
+      random: () => 1,
+      sleep: async (delay) => delays.push(delay),
+    });
+    const res = response();
+
+    await handler(
+      { params: { action: "github-status" }, query: { username: "octocat" } },
+      res,
+    );
+
+    assert.equal(calls, 3, `status ${status} must use all attempts`);
+    assert.deepEqual(delays, [10, 20]);
+  }
+});
+
+test("uses Retry-After before exponential backoff", async () => {
+  let calls = 0;
+  const delays = [];
+  const handler = createHandler({
+    githubFetcher: async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw { response: { status: 429, headers: { "retry-after": "2" } } };
+      }
+      return { login: "octocat" };
+    },
+    renderer: async () => "<svg />",
+    maxRetries: 2,
+    retryDelay: 10,
+    sleep: async (delay) => delays.push(delay),
+  });
+  const res = response();
+
+  await handler(
+    { params: { action: "github-status" }, query: { username: "octocat" } },
+    res,
+  );
+
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [2_000]);
+});
+
+test("returns 504 when a retry delay would exceed the request deadline", async () => {
+  const handler = createHandler({
+    githubFetcher: async () => {
+      throw { response: { status: 503 } };
+    },
+    maxRetries: 3,
+    retryDelay: 100,
+    deadlineMs: 50,
+    random: () => 1,
+    sleep: async () => assert.fail("deadline must prevent a retry"),
+  });
+  const res = response();
+
+  await handler(
+    { params: { action: "github-status" }, query: { username: "octocat" } },
+    res,
+  );
+
+  assert.deepEqual(
+    [res.statusCode, res.body],
+    [504, "Upstream service temporarily unavailable"],
+  );
+});
+
+test("identifies only allowed HTTP statuses and network errors as retryable", () => {
+  assert.equal(isRetryableError({ response: { status: 502 } }), true);
+  assert.equal(isRetryableError({ code: "ECONNRESET" }), true);
+  assert.equal(isRetryableError({ response: { status: 401 } }), false);
+  assert.equal(
+    isRetryableError({
+      response: { status: 503, data: { errors: [{ message: "validation" }] } },
+    }),
+    false,
+  );
+  assert.equal(isRetryableError(new TypeError("programming mistake")), false);
 });

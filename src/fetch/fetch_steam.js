@@ -1,29 +1,58 @@
 import "dotenv/config";
-import axios from "axios";
+import { createTtlCache } from "../utils/cache.js";
+import { createRequestDeadline, steamClient, upstreamRequest } from "./http.js";
 
+const steamApiBaseUrl = "https://api.steampowered.com/";
 const steamCDNBaseUrl =
   "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/";
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000;
 
 const fetchSteamStatus = async (steamID) => {
-  const apiKey = process.env.STEAM_API_KEY; // Load API key from .env
-  const userProfileUrl = `http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${apiKey}&steamids=${steamID}&format=json`;
-  const recentGamesUrl = `http://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v0001/?key=${apiKey}&steamid=${steamID}&format=json`;
-  const ownedGamesUrl = `http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=${apiKey}&steamid=${steamID}&format=json&include_played_free_games=true`;
-  const badgesUrl = `https://api.steampowered.com/IPlayerService/GetBadges/v1/?key=${apiKey}&steamid=${steamID}&format=json`;
-  const animatedAvatarUrl = `https://api.steampowered.com/IPlayerService/GetAnimatedAvatar/v1/?key=${apiKey}&steamid=${steamID}&format=json`;
+  const cachedData = cache.get(steamID);
+  if (cachedData) return cachedData;
+
+  const apiKey = process.env.STEAM_API_KEY;
+  const urls = {
+    userProfile: buildSteamApiUrl(
+      "ISteamUser/GetPlayerSummaries/v0002/",
+      apiKey,
+      {
+        steamids: steamID,
+      },
+    ),
+    recentGames: buildSteamApiUrl(
+      "IPlayerService/GetRecentlyPlayedGames/v0001/",
+      apiKey,
+      { steamid: steamID },
+    ),
+    ownedGames: buildSteamApiUrl(
+      "IPlayerService/GetOwnedGames/v0001/",
+      apiKey,
+      {
+        steamid: steamID,
+        include_played_free_games: true,
+      },
+    ),
+    badges: buildSteamApiUrl("IPlayerService/GetBadges/v1/", apiKey, {
+      steamid: steamID,
+    }),
+    animatedAvatar: buildSteamApiUrl(
+      "IPlayerService/GetAnimatedAvatar/v1/",
+      apiKey,
+      { steamid: steamID },
+    ),
+  };
+  const deadline = createRequestDeadline();
 
   try {
-    // Check if we have cached data
-    const cachedData = cache.get(steamID);
-    if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-      console.log("Returning cached data for", steamID);
-      return cachedData.data;
-    }
-
-    console.time("steam API calls");
-    // Fetch data concurrently using Promise.all
+    const request = (url) =>
+      upstreamRequest(
+        steamClient,
+        { method: "get", url },
+        deadline,
+        "Steam API",
+      );
     const [
       userProfileResponse,
       recentGamesResponse,
@@ -31,114 +60,90 @@ const fetchSteamStatus = async (steamID) => {
       badgesResponse,
       animatedAvatarResponse,
     ] = await Promise.all([
-      axios.get(userProfileUrl),
-      axios.get(recentGamesUrl),
-      axios.get(ownedGamesUrl),
-      axios.get(badgesUrl),
-      axios.get(animatedAvatarUrl),
+      request(urls.userProfile),
+      request(urls.recentGames),
+      request(urls.ownedGames),
+      request(urls.badges),
+      request(urls.animatedAvatar),
     ]);
-    console.timeEnd("steam API calls");
 
-    console.time("process steam data");
-    // Extract the necessary data
-    const userProfileData = userProfileResponse.data.response.players[0];
+    const userProfileData = userProfileResponse.data.response.players?.[0];
+    if (!userProfileData) throw createNotFoundError(steamID);
+
     const recentGamesData = recentGamesResponse.data.response.games || [];
     const ownedGamesData = ownedGamesResponse.data.response.games || [];
     const animatedAvatarData =
-      animatedAvatarResponse.data.response.avatar || "";
-
-    const steamData = {
-      username: userProfileData.personaname,
-      avatar: `${steamCDNBaseUrl}${animatedAvatarData.image_small}`,
-      profile_url: userProfileData.profileurl,
-      user_status:
-        userProfileData.personastate === 0
-          ? "Offline"
-          : userProfileData.personastate === 1
-            ? "Online"
-            : userProfileData.personastate === 2
-              ? "Busy"
-              : userProfileData.personastate === 3
-                ? "Away"
-                : userProfileData.personastate === 4
-                  ? "Snooze"
-                  : userProfileData.personastate === 5
-                    ? "Looking to trade"
-                    : userProfileData.personastate === 6
-                      ? "Looking to play"
-                      : "Unknown",
-      last_logoff: userProfileData.lastlogoff,
-      created: userProfileData.timecreated,
-      steam_level: badgesResponse.data.response.player_level,
-      recent_played_games: recentGamesData,
-      recent_played_games_count: recentGamesResponse.data.response.total_count,
-      total_owned_games: ownedGamesResponse.data.response.game_count,
-      total_playtime: ownedGamesData.reduce(
-        (total, game) => total + game.playtime_forever,
-        0,
-      ),
-      total_playtime_list: [],
-    };
-
+      animatedAvatarResponse.data.response.avatar || {};
+    const totalPlaytime = ownedGamesData.reduce(
+      (total, game) => total + (game.playtime_forever || 0),
+      0,
+    );
     const platformPlaytimes = {
       windows: "playtime_windows_forever",
       mac: "playtime_mac_forever",
       linux: "playtime_linux_forever",
       deck: "playtime_deck_forever",
     };
-
-    const playtimesByPlatform = Object.entries(platformPlaytimes).reduce(
-      (acc, [platform, playtimeKey]) => {
-        acc[platform] = ownedGamesData.reduce(
+    const playtimesByPlatform = Object.fromEntries(
+      Object.entries(platformPlaytimes).map(([platform, playtimeKey]) => [
+        platform,
+        ownedGamesData.reduce(
           (total, game) => total + (game[playtimeKey] || 0),
           0,
-        );
-        return acc;
-      },
-      {},
+        ),
+      ]),
     );
-
-    const totalPlaytime = Object.values(playtimesByPlatform).reduce(
+    const knownPlaytime = Object.values(playtimesByPlatform).reduce(
       (sum, playtime) => sum + playtime,
       0,
     );
-    const unknownPlaytime = steamData.total_playtime - totalPlaytime;
+    const unknownPlaytime = totalPlaytime - knownPlaytime;
+    if (unknownPlaytime > 0) playtimesByPlatform.unknown = unknownPlaytime;
 
-    if (unknownPlaytime > 0) {
-      playtimesByPlatform.unknown = unknownPlaytime;
-    }
-
-    steamData.total_playtime_list = Object.entries(playtimesByPlatform)
+    const totalPlaytimeList = Object.entries(playtimesByPlatform)
       .map(([platform, playtime]) => ({ [platform]: playtime }))
       .sort((a, b) => Object.values(b)[0] - Object.values(a)[0]);
+    const steamData = {
+      username: userProfileData.personaname,
+      avatar: `${steamCDNBaseUrl}${animatedAvatarData.image_small || ""}`,
+      profile_url: userProfileData.profileurl,
+      user_status:
+        [
+          "Offline",
+          "Online",
+          "Busy",
+          "Away",
+          "Snooze",
+          "Looking to trade",
+          "Looking to play",
+        ][userProfileData.personastate] || "Unknown",
+      last_logoff: userProfileData.lastlogoff,
+      created: userProfileData.timecreated,
+      steam_level: badgesResponse.data.response.player_level,
+      recent_played_games: recentGamesData,
+      recent_played_games_count: recentGamesResponse.data.response.total_count,
+      total_owned_games: ownedGamesResponse.data.response.game_count,
+      total_playtime: totalPlaytime,
+      total_playtime_list: totalPlaytimeList,
+      playtime_percentage_list:
+        totalPlaytime === 0
+          ? []
+          : totalPlaytimeList
+              .map((item) => {
+                const [platform, playtime] = Object.entries(item)[0];
+                return {
+                  [platform]: Number(
+                    ((playtime / totalPlaytime) * 100).toFixed(5),
+                  ),
+                };
+              })
+              .filter((item) => Object.values(item)[0] > 0),
+    };
 
-    steamData.playtime_percentage_list =
-      steamData.total_playtime === 0
-        ? []
-        : steamData.total_playtime_list.map((item) => {
-            const [platform, playtime] = Object.entries(item)[0];
-            return {
-              [platform]: Number(
-                ((playtime / steamData.total_playtime) * 100).toFixed(5),
-              ),
-            };
-          });
-
-    // Remove platforms with 0 percentage
-    steamData.playtime_percentage_list =
-      steamData.playtime_percentage_list.filter(
-        (item) => Object.values(item)[0] > 0,
-      );
-
-    console.timeEnd("process steam data");
-
-    // Cache the data
-    cache.set(steamID, { data: steamData, timestamp: Date.now() });
-
+    cache.set(steamID, steamData);
     return steamData;
-  } catch (error) {
-    console.error(`Error fetching Steam status: ${error.message}`);
-    throw error; // Re-throw the error to allow for external error handling
+  } finally {
+    deadline.dispose();
   }
 };
 

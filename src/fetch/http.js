@@ -12,6 +12,7 @@ export class UpstreamRequestError extends Error {
     super(message, { cause });
     this.name = "UpstreamRequestError";
     this.status = status;
+    this.response = status ? { status } : undefined;
   }
 }
 

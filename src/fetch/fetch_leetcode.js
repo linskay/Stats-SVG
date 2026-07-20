@@ -1,4 +1,10 @@
-import axios from "axios";
+import NotFound from "../errors/not_found.js";
+import { createTtlCache } from "../utils/cache.js";
+import {
+  createRequestDeadline,
+  leetcodeClient,
+  upstreamRequest,
+} from "./http.js";
 
 const cache = new Map();
 const CACHE_TTL = 2 * 60 * 1000;
@@ -90,69 +96,38 @@ async function fetchLeetCodeStats(username) {
     }
   }`;
 
-  try {
-    // Check if we have cached data
-    const cachedData = cache.get(username);
-    if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-      console.log("Returning cached data for", username);
-      return cachedData.data;
-    }
+  // Check if we have cached data
+  const cached = cache.get(username);
+  if (cached) {
+    console.log("Returning cached data for", username);
+    return cached;
+  }
 
-    console.time("leetcode API calls");
+  console.time("leetcode API calls");
+  const deadline = createRequestDeadline();
+  const request = (query) =>
+    upstreamRequest(
+      leetcodeClient,
+      {
+        method: "post",
+        url: LEETCODE_API_ENDPOINT,
+        data: { query, variables: { username } },
+        headers: {
+          "Content-Type": "application/json",
+          Referer: "https://leetcode.com",
+        },
+      },
+      deadline,
+      "LeetCode API",
+    );
+
+  try {
     const [user_data, skill_data, language_data, contest_data] =
       await Promise.all([
-        axios.post(
-          LEETCODE_API_ENDPOINT,
-          {
-            query: user_query,
-            variables: { username: username },
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Referer: "https://leetcode.com",
-            },
-          },
-        ),
-        axios.post(
-          LEETCODE_API_ENDPOINT,
-          {
-            query: skill_query,
-            variables: { username: username },
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Referer: "https://leetcode.com",
-            },
-          },
-        ),
-        axios.post(
-          LEETCODE_API_ENDPOINT,
-          {
-            query: language_query,
-            variables: { username: username },
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Referer: "https://leetcode.com",
-            },
-          },
-        ),
-        axios.post(
-          LEETCODE_API_ENDPOINT,
-          {
-            query: contest_query,
-            variables: { username: username },
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Referer: "https://leetcode.com",
-            },
-          },
-        ),
+        request(user_query),
+        request(skill_query),
+        request(language_query),
+        request(contest_query),
       ]);
 
     console.timeEnd("leetcode API calls");
@@ -166,10 +141,14 @@ async function fetchLeetCodeStats(username) {
     });
 
     const user_data_extracted = user_data.data.data.matchedUser;
-    const skill_data_extracted =
-      skill_data.data.data.matchedUser.tagProblemCounts;
-    const language_data_extracted =
-      language_data.data.data.matchedUser.languageProblemCount;
+    const skill_user = skill_data.data.data.matchedUser;
+    const language_user = language_data.data.data.matchedUser;
+    if (!user_data_extracted || !skill_user || !language_user) {
+      throw new NotFound(`LeetCode user ${username} not found`);
+    }
+
+    const skill_data_extracted = skill_user.tagProblemCounts;
+    const language_data_extracted = language_user.languageProblemCount;
     const contest_data_extracted = contest_data.data.data.userContestRanking;
 
     const leetcode_stats = {
@@ -224,6 +203,8 @@ async function fetchLeetCodeStats(username) {
   } catch (error) {
     console.error("Error fetching LeetCode stats:", error);
     throw error;
+  } finally {
+    deadline.dispose();
   }
 }
 
