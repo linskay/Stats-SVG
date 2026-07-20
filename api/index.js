@@ -34,6 +34,9 @@ async function fetchLeetCodeStatsWithRetry(username, maxRetries = 5, retryDelay 
     } catch (error) {
       lastError = error; // Update lastError with the most recent error
       console.error(`Attempt ${attempt + 1} failed:`, error.message);
+      if (error.name === 'NotFound') {
+        throw error;
+      }
       if (attempt < maxRetries - 1) { // Check if more retries are allowed
         console.log(`Retrying in ${retryDelay}ms...`);
         await new Promise(resolve => setTimeout(resolve, retryDelay)); // Wait before retrying
@@ -54,6 +57,9 @@ async function fetchSteamStatusWithRetry(username, maxRetries = 5, retryDelay = 
     } catch (error) {
       lastError = error; // Update lastError with the most recent error
       console.error(`Attempt ${attempt + 1} failed:`, error.message);
+      if (error.name === 'NotFound') {
+        throw error;
+      }
       if (attempt < maxRetries - 1) { // Check if more retries are allowed
         console.log(`Retrying in ${retryDelay}ms...`);
         await new Promise(resolve => setTimeout(resolve, retryDelay)); // Wait before retrying
@@ -100,7 +106,9 @@ export default async function handler(req, res) {
     console.error('Error in handler:', error);
     // Use error handling specific to your server framework
     // For example, in Express.js:
-    if (error.response && error.response.status === 403) {
+    if (error.name === 'NotFound') {
+      res.status(404).send(error.message);
+    } else if (error.response && error.response.status === 403) {
       res.status(503).send('Service temporarily unavailable due to GitHub API rate limits. Please try again later.');
     } else {
       res.status(500).send('Error fetching data or rendering image');

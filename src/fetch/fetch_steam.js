@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import axios from 'axios';
+import NotFound from '../errors/not_found.js';
 
 const steamCDNBaseUrl = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/';
 
@@ -36,14 +37,23 @@ const fetchSteamStatus = async (steamID) => {
 
         console.time('process steam data');
         // Extract the necessary data
-        const userProfileData = userProfileResponse.data.response.players[0];
-        const recentGamesData = recentGamesResponse.data.response.games || [];
-        const ownedGamesData = ownedGamesResponse.data.response.games || [];
-        const animatedAvatarData = animatedAvatarResponse.data.response.avatar || '';
+        const userProfileData = userProfileResponse.data?.response?.players?.[0];
+
+        if (!userProfileData) {
+            console.timeEnd('process steam data');
+            throw new NotFound(`Steam user ${steamID} not found`);
+        }
+
+        const recentGamesResponseData = recentGamesResponse.data?.response || {};
+        const ownedGamesResponseData = ownedGamesResponse.data?.response || {};
+        const badgesResponseData = badgesResponse.data?.response || {};
+        const animatedAvatarData = animatedAvatarResponse.data?.response?.avatar || {};
+        const recentGamesData = recentGamesResponseData.games || [];
+        const ownedGamesData = ownedGamesResponseData.games || [];
 
         const steamData = {
             username: userProfileData.personaname,
-            avatar: `${steamCDNBaseUrl}${animatedAvatarData.image_small}`,
+            avatar: animatedAvatarData.image_small ? `${steamCDNBaseUrl}${animatedAvatarData.image_small}` : '',
             profile_url: userProfileData.profileurl,
             user_status: userProfileData.personastate === 0 ? 'Offline' :
                          userProfileData.personastate === 1 ? 'Online' :
@@ -55,11 +65,11 @@ const fetchSteamStatus = async (steamID) => {
                          'Unknown',
             last_logoff: userProfileData.lastlogoff,
             created: userProfileData.timecreated,
-            steam_level: badgesResponse.data.response.player_level,
+            steam_level: badgesResponseData.player_level || 0,
             recent_played_games: recentGamesData,
-            recent_played_games_count: recentGamesResponse.data.response.total_count,
-            total_owned_games: ownedGamesResponse.data.response.game_count,
-            total_playtime: ownedGamesData.reduce((total, game) => total + game.playtime_forever, 0),
+            recent_played_games_count: recentGamesResponseData.total_count || 0,
+            total_owned_games: ownedGamesResponseData.game_count || 0,
+            total_playtime: ownedGamesData.reduce((total, game) => total + (game.playtime_forever || 0), 0),
             total_playtime_list: []
         };
 
@@ -86,12 +96,14 @@ const fetchSteamStatus = async (steamID) => {
             .map(([platform, playtime]) => ({ [platform]: playtime }))
             .sort((a, b) => Object.values(b)[0] - Object.values(a)[0]);
 
-        steamData.playtime_percentage_list = steamData.total_playtime_list.map(item => {
-            const [platform, playtime] = Object.entries(item)[0];
-            return {
-                [platform]: Number(((playtime / steamData.total_playtime) * 100).toFixed(5))
-            };
-        });
+        steamData.playtime_percentage_list = steamData.total_playtime === 0
+            ? []
+            : steamData.total_playtime_list.map(item => {
+                const [platform, playtime] = Object.entries(item)[0];
+                return {
+                    [platform]: Number(((playtime / steamData.total_playtime) * 100).toFixed(5))
+                };
+            });
 
         // Remove platforms with 0 percentage
         steamData.playtime_percentage_list = steamData.playtime_percentage_list.filter(item => Object.values(item)[0] > 0);
