@@ -151,10 +151,28 @@ async function fetchLeetCodeStats(username) {
       }
     });
 
-    const user_data_extracted = user_data.data.data.matchedUser;
-    const skill_data_extracted = skill_data.data.data.matchedUser.tagProblemCounts;
-    const language_data_extracted = language_data.data.data.matchedUser.languageProblemCount;
-    const contest_data_extracted = contest_data.data.data.userContestRanking;
+    const user_data_extracted = user_data.data?.data?.matchedUser;
+    const skill_user = skill_data.data?.data?.matchedUser;
+    const language_user = language_data.data?.data?.matchedUser;
+
+    if (!user_data_extracted || !skill_user || !language_user) {
+      console.timeEnd('process leetcode data');
+      throw new NotFound(`LeetCode user ${username} not found`);
+    }
+
+    const skill_data_extracted = skill_user.tagProblemCounts;
+    const language_data_extracted = language_user.languageProblemCount;
+
+    if (!skill_data_extracted ||
+        !Array.isArray(skill_data_extracted.advanced) ||
+        !Array.isArray(skill_data_extracted.intermediate) ||
+        !Array.isArray(skill_data_extracted.fundamental) ||
+        !Array.isArray(language_data_extracted)) {
+      console.timeEnd('process leetcode data');
+      throw new Error('Incomplete LeetCode profile data received');
+    }
+
+    const contest_data_extracted = contest_data.data?.data?.userContestRanking;
 
     const leetcode_stats = {
         "username": user_data_extracted.username,
