@@ -1,19 +1,31 @@
-import axios from "axios";
 import "dotenv/config";
+import pLimit from "p-limit";
 import { calculateLanguagePercentage } from "../utils/calculateLang.js";
 import { calculateRank } from "../utils/calculateRank.js";
+import { createTtlCache } from "../utils/cache.js";
+import { githubClient } from "./http.js";
 import config from "../../config.js";
-import pkg from "http2-wrapper";
-const { http2Adapter } = pkg;
 
-const { http2Adapter } = pkg;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GRAPHQL_QUERY_USER_INFO = `
   query userInfo($login: String!) {
     user(login: $login) {
       name
       login
+      createdAt
       followers {
+        totalCount
+      }
+      pullRequests {
+        totalCount
+      }
+      repositoryDiscussions {
+        totalCount
+      }
+      repositoryDiscussionComments {
+        totalCount
+      }
+      repositoriesContributedTo {
         totalCount
       }
     }
@@ -79,14 +91,13 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
   }
 `;
 
-// Add a simple in-memory cache
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
 async function fetchGitHubData(username) {
   console.log("Fetching data for", username);
 
+  const cacheKey = `github:${username.trim().toLowerCase()}`;
   const cachedData = cache.get(cacheKey);
   if (cachedData) {
     return cachedData;
@@ -108,7 +119,7 @@ async function fetchGitHubData(username) {
     console.time("GitHub API calls");
 
     const fetchUserInfo = async () => {
-      const response = await http2Axios.post(
+      const response = await githubClient.post(
         url,
         { query: GRAPHQL_QUERY_USER_INFO, variables: { login: username } },
         { headers },
@@ -122,7 +133,7 @@ async function fetchGitHubData(username) {
       let after = null;
 
       while (hasNextPage) {
-        const response = await http2Axios.post(
+        const response = await githubClient.post(
           url,
           {
             query: GRAPHQL_QUERY_REPOSITORIES,
@@ -142,10 +153,7 @@ async function fetchGitHubData(username) {
         after = data.repositories.pageInfo.endCursor;
       }
 
-      return {
-        repositories: { nodes: allRepositories },
-        repositoriesContributedTo: { totalCount: contributedToCount },
-      };
+      return { repositories: { nodes: allRepositories } };
     };
 
     async function fetchContributionsCalendar(username, fromDate, toDate) {
@@ -156,6 +164,7 @@ async function fetchGitHubData(username) {
       const isMoreThanOneYear = endDate - startDate > 365 * 24 * 60 * 60 * 1000;
 
       if (isMoreThanOneYear) {
+        const limit = pLimit(ALL_TIME_CONTRIBUTIONS_CONCURRENCY);
         const promises = [];
 
         // Separate the date range by year
@@ -173,7 +182,9 @@ async function fetchGitHubData(username) {
 
           // Create a promise for the current year range
           promises.push(
-            fetchContributionsForYear(url, headers, username, from, to),
+            limit(() =>
+              fetchContributionsForYear(url, headers, username, from, to),
+            ),
           );
         }
 
@@ -248,8 +259,7 @@ async function fetchGitHubData(username) {
           (acc, repo) => acc + (repo.forkCount || 0),
           0,
         ) || 0,
-      total_contributes_to:
-        repositories.repositoriesContributedTo?.totalCount || 0,
+      total_contributes_to: userInfo.repositoriesContributedTo?.totalCount || 0,
       top_languages: calculateTopLanguages(
         repositories.repositories?.nodes || [],
       ),
@@ -338,7 +348,7 @@ async function fetchContributionsForYear(
   fromDate,
   toDate,
 ) {
-  const response = await http2Axios.post(
+  const response = await githubClient.post(
     url,
     {
       query: GRAPHQL_QUERY_CONTRIBUTIONS_CALENDAR,
@@ -381,7 +391,7 @@ async function fetchAllTimeContributions(
   const createdDate = new Date(userCreatedAt);
   const currentDate = new Date();
 
-  // Create an array of promises for each year
+  const limit = pLimit(ALL_TIME_CONTRIBUTIONS_CONCURRENCY);
   const promises = [];
 
   for (
@@ -403,33 +413,34 @@ async function fetchAllTimeContributions(
 
     // Create a promise for fetching this year's contributions
     promises.push(
-      http2Axios
-        .post(
-          url,
-          {
-            query: GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR,
-            variables: {
-              login: username,
-              from: yearStart.toISOString(),
-              to: yearEnd.toISOString(),
+      limit(() =>
+        githubClient
+          .post(
+            url,
+            {
+              query: GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR,
+              variables: {
+                login: username,
+                from: yearStart.toISOString(),
+                to: yearEnd.toISOString(),
+              },
             },
-          },
-          { headers },
-        )
-        .then((response) => {
-          const contributions =
-            response.data?.data?.user?.contributionsCollection;
-          return {
-            commits: contributions?.totalCommitContributions || 0,
-            prs: contributions?.totalPullRequestContributions || 0,
-            reviews: contributions?.totalPullRequestReviewContributions || 0,
-            issues: contributions?.totalIssueContributions || 0,
-          };
-        }),
+            { headers },
+          )
+          .then((response) => {
+            const contributions =
+              response.data?.data?.user?.contributionsCollection;
+            return {
+              commits: contributions?.totalCommitContributions || 0,
+              prs: contributions?.totalPullRequestContributions || 0,
+              reviews: contributions?.totalPullRequestReviewContributions || 0,
+              issues: contributions?.totalIssueContributions || 0,
+            };
+          }),
+      ),
     );
   }
 
-  // Execute all promises in parallel
   const yearlyContributions = await Promise.all(promises);
 
   // Sum up all contributions
@@ -443,7 +454,9 @@ async function fetchAllTimeContributions(
     { commits: 0, prs: 0, reviews: 0, issues: 0 },
   );
 
-  console.log(`Fetched contributions for ${promises.length} years in parallel`);
+  console.log(
+    `Fetched contributions for ${promises.length} years with concurrency ${ALL_TIME_CONTRIBUTIONS_CONCURRENCY}`,
+  );
   return totals;
 }
 
