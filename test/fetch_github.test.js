@@ -4,16 +4,15 @@ import fetchGitHubData from "../src/fetch/fetch_github.js";
 import { githubClient } from "../src/fetch/http.js";
 
 test("builds GitHub statistics for a user from the shared HTTP client", async () => {
-  const originalRequest = githubClient.request;
+  const originalAdapter = githubClient.defaults.adapter;
   const queries = [];
-  const requests = [];
-  githubClient.request = async ({ data, signal, timeout }) => {
-    requests.push({ signal, timeout });
-    const { query } = data;
+  githubClient.defaults.adapter = async (config) => {
+    const { query } = JSON.parse(config.data);
     queries.push(query);
 
     if (query.includes("query userInfo")) {
       return {
+        config,
         data: {
           data: {
             user: {
@@ -33,6 +32,7 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
 
     if (query.includes("query userRepositories")) {
       return {
+        config,
         data: {
           data: {
             user: {
@@ -61,6 +61,7 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
 
     if (query.includes("query userContributionsByYear")) {
       return {
+        config,
         data: {
           data: {
             user: {
@@ -77,6 +78,7 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
     }
 
     return {
+      config,
       data: {
         data: {
           user: {
@@ -142,6 +144,6 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
     );
     assert.ok(requests.every((request) => request.timeout <= 7_000));
   } finally {
-    githubClient.request = originalRequest;
+    githubClient.defaults.adapter = originalAdapter;
   }
 });

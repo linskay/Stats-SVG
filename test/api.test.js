@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHandler, validateUsername } from "../api/index.js";
+import { UpstreamRequestError } from "../src/fetch/http.js";
 
 function response() {
   return {
@@ -76,12 +77,12 @@ test("returns 404 for a missing upstream user and 502 for an upstream failure", 
   );
 });
 
-test("returns 503 when an upstream request is temporarily unavailable", async () => {
+test("returns 503 for a temporary upstream timeout", async () => {
   const handler = createHandler({
     githubFetcher: async () => {
-      const error = new Error("temporary upstream failure");
-      error.status = 503;
-      throw error;
+      throw new UpstreamRequestError("GitHub API is temporarily unavailable", {
+        status: 503,
+      });
     },
     maxRetries: 1,
   });

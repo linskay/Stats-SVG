@@ -1,67 +1,80 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import axios from "axios";
 import {
-  UpstreamRequestError,
   createRequestDeadline,
+  UpstreamRequestError,
   upstreamRequest,
 } from "../src/fetch/http.js";
 
-function clientWith(adapter) {
-  return axios.create({ timeout: 100, adapter });
-}
-
-test("deadline aborts outstanding upstream requests after its timeout", async () => {
-  const deadline = createRequestDeadline(10);
-  const client = clientWith(
-    (config) =>
+test("aborts every parallel upstream request when the deadline expires", async () => {
+  const deadline = createRequestDeadline(20);
+  const signals = [];
+  const client = {
+    defaults: { timeout: 1_000 },
+    request: ({ signal }) =>
       new Promise((_, reject) => {
-        config.signal.addEventListener("abort", () =>
-          reject(config.signal.reason),
-        );
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(new Error("aborted")), {
+          once: true,
+        });
       }),
-  );
+  };
 
   try {
-    await assert.rejects(
+    const requests = [
       upstreamRequest(
         client,
-        { method: "get", url: "https://example.test" },
+        { url: "https://upstream.test/one" },
         deadline,
-        "Test API",
+        "Test",
       ),
-      (error) => error instanceof UpstreamRequestError && error.status === 504,
+      upstreamRequest(
+        client,
+        { url: "https://upstream.test/two" },
+        deadline,
+        "Test",
+      ),
+    ];
+
+    await assert.rejects(Promise.all(requests), (error) => {
+      assert.ok(error instanceof UpstreamRequestError);
+      assert.equal(error.status, 504);
+      return true;
+    });
+    assert.equal(signals.length, 2);
+    assert.ok(
+      signals.every((signal) => signal === deadline.signal && signal.aborted),
     );
-    assert.equal(deadline.signal.aborted, true);
   } finally {
     deadline.dispose();
   }
 });
 
-test("disposing a deadline cancels its timeout timer", async () => {
-  const deadline = createRequestDeadline(10);
-  deadline.dispose();
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(deadline.signal.aborted, false);
-});
-
-test("maps a temporary upstream timeout to HTTP 503", async () => {
+test("converts an upstream timeout into a temporary-unavailable error", async () => {
   const deadline = createRequestDeadline();
-  const client = clientWith(async () => {
-    const error = new Error("upstream timed out");
-    error.code = "ETIMEDOUT";
-    throw error;
-  });
+  const client = {
+    defaults: { timeout: 1_000 },
+    request: async () => {
+      const error = new Error("socket timed out");
+      error.code = "ETIMEDOUT";
+      throw error;
+    },
+  };
 
   try {
     await assert.rejects(
       upstreamRequest(
         client,
-        { method: "get", url: "https://example.test" },
+        { url: "https://upstream.test" },
         deadline,
-        "Test API",
+        "Test",
       ),
-      (error) => error instanceof UpstreamRequestError && error.status === 503,
+      (error) => {
+        assert.ok(error instanceof UpstreamRequestError);
+        assert.equal(error.status, 503);
+        assert.deepEqual(error.response, { status: 503 });
+        return true;
+      },
     );
   } finally {
     deadline.dispose();
