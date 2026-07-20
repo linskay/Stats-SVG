@@ -4,13 +4,15 @@ import fetchGitHubData from "../src/fetch/fetch_github.js";
 import { githubClient } from "../src/fetch/http.js";
 
 test("builds GitHub statistics for a user from the shared HTTP client", async () => {
-  const originalPost = githubClient.post;
+  const originalAdapter = githubClient.defaults.adapter;
   const queries = [];
-  githubClient.post = async (_url, { query }) => {
+  githubClient.defaults.adapter = async (config) => {
+    const { query } = JSON.parse(config.data);
     queries.push(query);
 
     if (query.includes("query userInfo")) {
       return {
+        config,
         data: {
           data: {
             user: {
@@ -30,6 +32,7 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
 
     if (query.includes("query userRepositories")) {
       return {
+        config,
         data: {
           data: {
             user: {
@@ -58,6 +61,7 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
 
     if (query.includes("query userContributionsByYear")) {
       return {
+        config,
         data: {
           data: {
             user: {
@@ -74,6 +78,7 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
     }
 
     return {
+      config,
       data: {
         data: {
           user: {
@@ -135,6 +140,6 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
     );
     assert.ok(queries.some((query) => query.includes("createdAt")));
   } finally {
-    githubClient.post = originalPost;
+    githubClient.defaults.adapter = originalAdapter;
   }
 });

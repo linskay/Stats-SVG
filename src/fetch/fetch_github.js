@@ -3,7 +3,11 @@ import pLimit from "p-limit";
 import { calculateLanguagePercentage } from "../utils/calculateLang.js";
 import { calculateRank } from "../utils/calculateRank.js";
 import { createTtlCache } from "../utils/cache.js";
-import { githubClient } from "./http.js";
+import {
+  createRequestDeadline,
+  githubClient,
+  upstreamRequest,
+} from "./http.js";
 import config from "../../config.js";
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -115,15 +119,23 @@ async function fetchGitHubData(username) {
     now.getDate() - config.contribution_distribution.days_to_show + 1,
   );
 
+  const deadline = createRequestDeadline();
+  const request = (data) =>
+    upstreamRequest(
+      githubClient,
+      { method: "post", url, data, headers },
+      deadline,
+      "GitHub API",
+    );
+
   try {
     console.time("GitHub API calls");
 
     const fetchUserInfo = async () => {
-      const response = await githubClient.post(
-        url,
-        { query: GRAPHQL_QUERY_USER_INFO, variables: { login: username } },
-        { headers },
-      );
+      const response = await request({
+        query: GRAPHQL_QUERY_USER_INFO,
+        variables: { login: username },
+      });
       return response.data?.data?.user;
     };
 
@@ -133,14 +145,10 @@ async function fetchGitHubData(username) {
       let after = null;
 
       while (hasNextPage) {
-        const response = await githubClient.post(
-          url,
-          {
-            query: GRAPHQL_QUERY_REPOSITORIES,
-            variables: { login: username, after },
-          },
-          { headers },
-        );
+        const response = await request({
+          query: GRAPHQL_QUERY_REPOSITORIES,
+          variables: { login: username, after },
+        });
 
         const data = response.data?.data?.user;
 
@@ -182,9 +190,7 @@ async function fetchGitHubData(username) {
 
           // Create a promise for the current year range
           promises.push(
-            limit(() =>
-              fetchContributionsForYear(url, headers, username, from, to),
-            ),
+            limit(() => fetchContributionsForYear(request, username, from, to)),
           );
         }
 
@@ -207,13 +213,7 @@ async function fetchGitHubData(username) {
         return combinedResult;
       } else {
         // If the period is 1 year or less, run a normal query
-        return fetchContributionsForYear(
-          url,
-          headers,
-          username,
-          startDate,
-          endDate,
-        );
+        return fetchContributionsForYear(request, username, startDate, endDate);
       }
     }
 
@@ -230,8 +230,7 @@ async function fetchGitHubData(username) {
     // Fetch all-time contributions in parallel
     console.time("Fetching all-time contributions");
     const allTimeContributions = await fetchAllTimeContributions(
-      url,
-      headers,
+      request,
       username,
       userInfo.createdAt,
     );
@@ -301,6 +300,8 @@ async function fetchGitHubData(username) {
   } catch (error) {
     console.error("Error fetching data from GitHub:", error);
     throw error;
+  } finally {
+    deadline.dispose();
   }
 }
 
@@ -341,25 +342,15 @@ async function processContributionsCalendar(contributionsCollection) {
   return result;
 }
 
-async function fetchContributionsForYear(
-  url,
-  headers,
-  username,
-  fromDate,
-  toDate,
-) {
-  const response = await githubClient.post(
-    url,
-    {
-      query: GRAPHQL_QUERY_CONTRIBUTIONS_CALENDAR,
-      variables: {
-        login: username,
-        from: fromDate.toISOString(),
-        to: toDate.toISOString(),
-      },
+async function fetchContributionsForYear(request, username, fromDate, toDate) {
+  const response = await request({
+    query: GRAPHQL_QUERY_CONTRIBUTIONS_CALENDAR,
+    variables: {
+      login: username,
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
     },
-    { headers },
-  );
+  });
 
   const contributionsCollection =
     response.data?.data?.user?.contributionsCollection;
@@ -382,12 +373,7 @@ async function fetchContributionsForYear(
   return result;
 }
 
-async function fetchAllTimeContributions(
-  url,
-  headers,
-  username,
-  userCreatedAt,
-) {
+async function fetchAllTimeContributions(request, username, userCreatedAt) {
   const createdDate = new Date(userCreatedAt);
   const currentDate = new Date();
 
@@ -414,29 +400,23 @@ async function fetchAllTimeContributions(
     // Create a promise for fetching this year's contributions
     promises.push(
       limit(() =>
-        githubClient
-          .post(
-            url,
-            {
-              query: GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR,
-              variables: {
-                login: username,
-                from: yearStart.toISOString(),
-                to: yearEnd.toISOString(),
-              },
-            },
-            { headers },
-          )
-          .then((response) => {
-            const contributions =
-              response.data?.data?.user?.contributionsCollection;
-            return {
-              commits: contributions?.totalCommitContributions || 0,
-              prs: contributions?.totalPullRequestContributions || 0,
-              reviews: contributions?.totalPullRequestReviewContributions || 0,
-              issues: contributions?.totalIssueContributions || 0,
-            };
-          }),
+        request({
+          query: GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR,
+          variables: {
+            login: username,
+            from: yearStart.toISOString(),
+            to: yearEnd.toISOString(),
+          },
+        }).then((response) => {
+          const contributions =
+            response.data?.data?.user?.contributionsCollection;
+          return {
+            commits: contributions?.totalCommitContributions || 0,
+            prs: contributions?.totalPullRequestContributions || 0,
+            reviews: contributions?.totalPullRequestReviewContributions || 0,
+            issues: contributions?.totalIssueContributions || 0,
+          };
+        }),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHandler, validateUsername } from "../api/index.js";
+import { UpstreamRequestError } from "../src/fetch/http.js";
 
 function response() {
   return {
@@ -73,5 +74,27 @@ test("returns 404 for a missing upstream user and 502 for an upstream failure", 
   assert.deepEqual(
     [second.statusCode, second.body],
     [502, "Upstream service error"],
+  );
+});
+
+test("returns 503 for a temporary upstream timeout", async () => {
+  const handler = createHandler({
+    githubFetcher: async () => {
+      throw new UpstreamRequestError("GitHub API is temporarily unavailable", {
+        status: 503,
+      });
+    },
+    maxRetries: 1,
+  });
+  const res = response();
+
+  await handler(
+    { params: { action: "github-status" }, query: { username: "octocat" } },
+    res,
+  );
+
+  assert.deepEqual(
+    [res.statusCode, res.body],
+    [503, "Upstream service temporarily unavailable"],
   );
 });

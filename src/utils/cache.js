@@ -29,7 +29,8 @@ export function createTtlCache({ ttl, maxSize }) {
       entries.delete(key);
       entries.set(key, { data, timestamp: Date.now() });
 
-      while (entries.size > maxSize) entries.delete(entries.keys().next().value);
-    }
+      while (entries.size > maxSize)
+        entries.delete(entries.keys().next().value);
+    },
   };
 }
