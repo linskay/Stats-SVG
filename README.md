@@ -19,7 +19,7 @@ This project generates a visually appealing, highly customizable SVG image displ
 Since the GitHub API only allows 5k requests per hour, the api provided by this repo could possibly hit the rate limiter. You can host your own instance of this repo on Vercel to avoid the rate limiter.
 
 > [!IMPORTANT]
-> This project requires a GitHub Personal Access Token (PAT) to access private repositories. Refer to the Manual Deployment section below for how you can get the PAT.
+> This project uses only public GitHub data. Create a Personal Access Token (PAT) with no access to private repositories or other private data. Refer to the Manual Deployment section below for how to create the token.
 
 <details>
  <summary><b>Manual Deployment</b></summary>
@@ -28,7 +28,8 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
 1. Fork this repository to your GitHub account
 2. [Create a Personal Access Token (PAT)](https://github.com/settings/tokens/new)
    - Set the token name (e.g., "stats-svg")
-   - Select scopes: `repo` and `user`
+   - Prefer a fine-grained token limited to **Public Repositories (read-only)**, with no additional account or repository permissions.
+   - If you use a classic token, leave all scopes unselected; do **not** grant `repo`, `user`, or any other scope that can expose private data.
    - Copy the generated token (you won't see it again so save it!)
 
 #### 2. Deploy to Vercel
