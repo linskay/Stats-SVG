@@ -1,12 +1,12 @@
 import axios from 'axios';
-import NotFound from '../errors/not_found.js';
+import { createTtlCache } from '../utils/cache.js';
 
-// Add a simple in-memory cache
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 
 async function fetchLeetCodeStats(username) {
   const LEETCODE_API_ENDPOINT = 'https://leetcode.com/graphql';
+  // The API handler validates the username before calling this function.
+  const cacheKey = username.toLowerCase();
 
   const skill_query = `
     query skillStats($username: String!) {
@@ -95,10 +95,10 @@ async function fetchLeetCodeStats(username) {
   try {
 
     // Check if we have cached data
-    const cachedData = cache.get(username);
-    if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) {
         console.log('Returning cached data for', username);
-        return cachedData.data;
+        return cachedData;
     }
 
     console.time('leetcode API calls');
@@ -213,7 +213,7 @@ async function fetchLeetCodeStats(username) {
     console.timeEnd('process leetcode data');
 
     // Cache the result
-    cache.set(username, { data: leetcode_stats, timestamp: Date.now() });
+    cache.set(cacheKey, leetcode_stats);
 
     return leetcode_stats;
 

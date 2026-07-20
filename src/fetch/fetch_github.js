@@ -2,6 +2,8 @@ import axios from 'axios';
 import 'dotenv/config';
 import { calculateLanguagePercentage } from '../utils/calculateLang.js';
 import { calculateRank } from '../utils/calculateRank.js';
+import { createTtlCache } from '../utils/cache.js';
+import config from '../../config.js';
 import pkg from 'http2-wrapper';
 
 const { http2Adapter } = pkg;
@@ -48,15 +50,47 @@ const GRAPHQL_QUERY_REPOSITORIES = `
   }
 `;
 
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000;
+const GRAPHQL_QUERY_CONTRIBUTIONS_CALENDAR = `
+  query userContributions($login: String!, $from: DateTime!, $to: DateTime!) {
+    user(login: $login) {
+      contributionsCollection(from: $from, to: $to) {
+        contributionCalendar {
+          totalContributions
+          weeks {
+            contributionDays {
+              date
+              contributionCount
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
+  query userContributionsByYear($login: String!, $from: DateTime!, $to: DateTime!) {
+    user(login: $login) {
+      contributionsCollection(from: $from, to: $to) {
+        totalCommitContributions
+        totalPullRequestContributions
+        totalPullRequestReviewContributions
+        totalIssueContributions
+      }
+    }
+  }
+`;
+
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 
 async function fetchGitHubData(username) {
   console.log('Fetching data for', username);
+  // The API handler validates the login before calling this function.
+  const cacheKey = username.toLowerCase();
 
-  const cachedData = cache.get(username);
-  if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-    return cachedData.data;
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) {
+    return cachedData;
   }
 
   const url = 'https://api.github.com/graphql';
@@ -138,7 +172,9 @@ async function fetchGitHubData(username) {
     stats.language_percentages = calculateLanguagePercentage(stats.top_languages);
     console.timeEnd('Data Processing');
 
-    cache.set(username, { data: stats, timestamp: Date.now() });
+    // Cache the results
+    cache.set(cacheKey, stats);
+
     return stats;
   } catch (error) {
     console.error('Error fetching data from GitHub:', error);

@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import axios from 'axios';
-import NotFound from '../errors/not_found.js';
+import { createTtlCache } from '../utils/cache.js';
 
 const steamCDNBaseUrl = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/';
 const steamApiBaseUrl = 'https://api.steampowered.com/';
@@ -16,11 +16,11 @@ const buildSteamApiUrl = (path, apiKey, parameters = {}) => {
     return url.toString();
 };
 
-// Add a simple in-memory cache
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
 
 const fetchSteamStatus = async (steamID) => {
+    // The API handler validates the SteamID before calling this function.
+    const cacheKey = steamID;
     const apiKey = process.env.STEAM_API_KEY; // Load API key from .env
     const userProfileUrl = buildSteamApiUrl('ISteamUser/GetPlayerSummaries/v0002/', apiKey, { steamids: steamID });
     const recentGamesUrl = buildSteamApiUrl('IPlayerService/GetRecentlyPlayedGames/v0001/', apiKey, { steamid: steamID });
@@ -33,10 +33,10 @@ const fetchSteamStatus = async (steamID) => {
 
     try {
         // Check if we have cached data
-        const cachedData = cache.get(steamID);
-        if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
+        const cachedData = cache.get(cacheKey);
+        if (cachedData) {
             console.log('Returning cached data for', steamID);
-            return cachedData.data;
+            return cachedData;
         }
         
         console.time('steam API calls');
@@ -126,7 +126,7 @@ const fetchSteamStatus = async (steamID) => {
         console.timeEnd('process steam data');
 
         // Cache the data
-        cache.set(steamID, { data: steamData, timestamp: Date.now() });
+        cache.set(cacheKey, steamData);
 
         return steamData;
 
