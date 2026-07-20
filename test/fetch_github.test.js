@@ -139,6 +139,10 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
       },
     );
     assert.ok(queries.some((query) => query.includes("createdAt")));
+    assert.ok(
+      requests.every((request) => request.signal === requests[0].signal),
+    );
+    assert.ok(requests.every((request) => request.timeout <= 7_000));
   } finally {
     githubClient.defaults.adapter = originalAdapter;
   }
