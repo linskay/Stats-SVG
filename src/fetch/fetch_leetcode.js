@@ -1,5 +1,5 @@
 import NotFound from "../errors/not_found.js";
-import { createTtlCache } from "../utils/cache.js";
+import { createSingleFlight, createTtlCache } from "../utils/cache.js";
 import {
   createRequestDeadline,
   leetcodeClient,
@@ -7,8 +7,13 @@ import {
 } from "./http.js";
 
 const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
+const singleFlight = createSingleFlight();
 
-async function fetchLeetCodeStats(username) {
+function getCacheKey(username) {
+  return `leetcode:${username.trim().toLowerCase()}`;
+}
+
+async function fetchLeetCodeStatsUncached(username) {
   const LEETCODE_API_ENDPOINT = "https://leetcode.com/graphql";
 
   const skill_query = `
@@ -96,7 +101,8 @@ async function fetchLeetCodeStats(username) {
   }`;
 
   // Check if we have cached data
-  const cached = cache.get(username);
+  const cacheKey = getCacheKey(username);
+  const cached = cache.get(cacheKey);
   if (cached) {
     console.log("Returning cached data for", username);
     return cached;
@@ -196,7 +202,7 @@ async function fetchLeetCodeStats(username) {
     console.timeEnd("process leetcode data");
 
     // Cache the result
-    cache.set(username, leetcode_stats);
+    cache.set(cacheKey, leetcode_stats);
 
     return leetcode_stats;
   } catch (error) {
@@ -205,6 +211,14 @@ async function fetchLeetCodeStats(username) {
   } finally {
     deadline.dispose();
   }
+}
+
+function fetchLeetCodeStats(username) {
+  const cacheKey = getCacheKey(username);
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) return Promise.resolve(cachedData);
+
+  return singleFlight(cacheKey, () => fetchLeetCodeStatsUncached(username));
 }
 
 export default fetchLeetCodeStats;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { calculateLanguagePercentage } from "../src/utils/calculateLang.js";
 import { calculateRank } from "../src/utils/calculateRank.js";
+import { createSingleFlight } from "../src/utils/cache.js";
 
 test("calculates language percentages using the k-metric and normalizes Jupyter Notebook", () => {
   const languages = calculateLanguagePercentage({
@@ -43,4 +44,27 @@ test("calculates rank level and percentile from contribution metrics", () => {
   assert.deepEqual(emptyRank, { level: "C", percentile: 100 });
   assert.equal(strongRank.level, "A+");
   assert.ok(strongRank.percentile < 12.5);
+});
+
+test("single-flight removes failed requests so they can be retried", async () => {
+  const singleFlight = createSingleFlight();
+  let attempts = 0;
+  const request = () => {
+    attempts += 1;
+    return Promise.reject(new Error("upstream failed"));
+  };
+
+  await assert.rejects(
+    Promise.all([
+      singleFlight("github:octocat", request),
+      singleFlight("github:octocat", request),
+    ]),
+    /upstream failed/,
+  );
+  await assert.rejects(
+    singleFlight("github:octocat", request),
+    /upstream failed/,
+  );
+
+  assert.equal(attempts, 2);
 });

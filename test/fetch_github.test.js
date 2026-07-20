@@ -3,7 +3,7 @@ import test from "node:test";
 import fetchGitHubData from "../src/fetch/fetch_github.js";
 import { githubClient } from "../src/fetch/http.js";
 
-test("builds GitHub statistics for a user from the shared HTTP client", async () => {
+test("deduplicates concurrent GitHub requests for the same user", async () => {
   const originalAdapter = githubClient.defaults.adapter;
   const queries = [];
   const requests = [];
@@ -102,7 +102,11 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
   };
 
   try {
-    const stats = await fetchGitHubData("Test-Octocat");
+    const [stats, secondStats, thirdStats] = await Promise.all([
+      fetchGitHubData("Test-Octocat"),
+      fetchGitHubData("test-octocat"),
+      fetchGitHubData("TEST-OCTOCAT"),
+    ]);
 
     assert.deepEqual(
       {
@@ -145,6 +149,9 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
       requests.every((request) => request.signal === requests[0].signal),
     );
     assert.ok(requests.every((request) => request.timeout <= 7_000));
+    assert.equal(requests.length, 4);
+    assert.deepEqual(secondStats, stats);
+    assert.deepEqual(thirdStats, stats);
   } finally {
     githubClient.defaults.adapter = originalAdapter;
   }

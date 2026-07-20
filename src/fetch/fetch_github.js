@@ -2,7 +2,7 @@ import "dotenv/config";
 import pLimit from "p-limit";
 import { calculateLanguagePercentage } from "../utils/calculateLang.js";
 import { calculateRank } from "../utils/calculateRank.js";
-import { createTtlCache } from "../utils/cache.js";
+import { createSingleFlight, createTtlCache } from "../utils/cache.js";
 import {
   createRequestDeadline,
   githubClient,
@@ -96,12 +96,17 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
 `;
 
 const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
+const singleFlight = createSingleFlight();
 const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
-async function fetchGitHubData(username) {
+function getCacheKey(username) {
+  return `github:${username.trim().toLowerCase()}`;
+}
+
+async function fetchGitHubDataUncached(username) {
   console.log("Fetching data for", username);
 
-  const cacheKey = `github:${username.trim().toLowerCase()}`;
+  const cacheKey = getCacheKey(username);
   const cachedData = cache.get(cacheKey);
   if (cachedData) return cachedData;
 
@@ -441,6 +446,14 @@ async function fetchAllTimeContributions(request, username, userCreatedAt) {
     `Fetched contributions for ${promises.length} years with concurrency ${ALL_TIME_CONTRIBUTIONS_CONCURRENCY}`,
   );
   return totals;
+}
+
+function fetchGitHubData(username) {
+  const cacheKey = getCacheKey(username);
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) return Promise.resolve(cachedData);
+
+  return singleFlight(cacheKey, () => fetchGitHubDataUncached(username));
 }
 
 export default fetchGitHubData;
