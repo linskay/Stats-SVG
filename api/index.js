@@ -1,63 +1,109 @@
-import fetchGitHubData from '../src/fetch/fetch_github.js';
-import fetchLeetCodeStats from '../src/fetch/fetch_leetcode.js';
-import fetchSteamStatus from '../src/fetch/fetch_steam.js';
-import renderStats from '../src/render/render_github.js';
-import { createRequestDeadline, UpstreamRequestError } from '../src/fetch/http.js';
+import fetchGitHubData from "../src/fetch/fetch_github.js";
+import fetchLeetCodeStats from "../src/fetch/fetch_leetcode.js";
+import fetchSteamStatus from "../src/fetch/fetch_steam.js";
+import renderStats from "../src/render/render_github.js";
 
-const endpoints = {
-  '/api/github-status': { provider: 'github', fetcher: fetchGitHubData },
-  '/api/leetcode-status': { provider: 'leetcode', fetcher: fetchLeetCodeStats },
-  '/api/steam-status': { provider: 'steam', fetcher: fetchSteamStatus }
-};
+const USERNAME_PATTERN = /^[A-Za-z0-9-]{1,39}$/;
 
-export default async function handler(req, res) {
-  const { username } = req.query;
-  const deadline = createRequestDeadline();
-
-  try {
-    if (req.url.includes('github-status')) {
-      const stats = await fetchGitHubData(username, deadline);
-      //console.log(stats);
-      console.time('render stats');
-      const svg = await renderStats(stats);
-      console.timeEnd('render stats');
-      deadline.throwIfExpired();
-      res.setHeader('Content-Type', 'image/svg+xml');
-      console.time('send svg');
-      res.send(svg);
-      console.timeEnd('send svg');
-
-    } else if (req.url.includes('leetcode-status')) {
-      console.time('fetch leetcode stats');
-      const stats = await fetchLeetCodeStats(username, deadline);
-      console.timeEnd('fetch leetcode stats');
-      deadline.throwIfExpired();
-      console.log(stats);
-      res.status(200).json(stats);
-
-    } else if (req.url.includes('steam-status')) {
-      console.time('fetch steam status');
-      const stats = await fetchSteamStatus(username, deadline);
-      console.timeEnd('fetch steam status');
-      deadline.throwIfExpired();
-      console.log(stats);
-      res.status(200).json(stats);
-    } else {
-      res.status(404).send('Not Found');
-    }
-    return res.status(200).json(stats);
-  } catch (error) {
-    console.error('Error in handler:', error);
-    // Use error handling specific to your server framework
-    // For example, in Express.js:
-    if (error instanceof UpstreamRequestError) {
-      res.status(error.status).send(error.status === 504 ? 'Request deadline exceeded. Please try again later.' : 'Upstream service temporarily unavailable. Please try again later.');
-    } else if (error.response && error.response.status === 403) {
-      res.status(503).send('Service temporarily unavailable due to GitHub API rate limits. Please try again later.');
-    } else {
-      res.status(500).send('Error fetching data or rendering image');
-    }
-  } finally {
-    deadline.dispose();
-  }
+function validateUsername(username) {
+  return typeof username === "string" && USERNAME_PATTERN.test(username);
 }
+
+async function fetchWithRetry(fetcher, username, maxRetries, retryDelay) {
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    try {
+      return await fetcher(username);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      }
+    }
+  }
+  throw lastError;
+}
+
+function sendUpstreamError(res, error) {
+  const status = error.response?.status;
+  if (status === 404) {
+    return res.status(404).send("User not found");
+  }
+  if (status === 403) {
+    return res
+      .status(503)
+      .send(
+        "Service temporarily unavailable due to upstream rate limits. Please try again later.",
+      );
+  }
+  if (status) {
+    return res.status(502).send("Upstream service error");
+  }
+  return res.status(500).send("Error fetching data or rendering image");
+}
+
+export function createHandler({
+  githubFetcher = fetchGitHubData,
+  leetcodeFetcher = fetchLeetCodeStats,
+  steamFetcher = fetchSteamStatus,
+  renderer = renderStats,
+  maxRetries = 5,
+  retryDelay = 1000,
+} = {}) {
+  return async function handler(req, res) {
+    const action =
+      req.params?.action ??
+      new URL(req.url, "http://localhost").pathname.split("/").pop();
+    const username = req.query?.username;
+
+    if (
+      !["github-status", "leetcode-status", "steam-status"].includes(action)
+    ) {
+      return res.status(404).send("Not Found");
+    }
+    if (!validateUsername(username)) {
+      return res
+        .status(400)
+        .send("A valid username query parameter is required");
+    }
+
+    try {
+      if (action === "github-status") {
+        const stats = await fetchWithRetry(
+          githubFetcher,
+          username,
+          maxRetries,
+          retryDelay,
+        );
+        const svg = await renderer(stats);
+        res.setHeader("Content-Type", "image/svg+xml");
+        return res.send(svg);
+      }
+      if (action === "leetcode-status") {
+        const stats = await fetchWithRetry(
+          leetcodeFetcher,
+          username,
+          maxRetries,
+          retryDelay,
+        );
+        return res.status(200).json(stats);
+      }
+      if (action === "steam-status") {
+        const stats = await fetchWithRetry(
+          steamFetcher,
+          username,
+          maxRetries,
+          retryDelay,
+        );
+        return res.status(200).json(stats);
+      }
+      return res.status(404).send("Not Found");
+    } catch (error) {
+      console.error("Error in handler:", error);
+      return sendUpstreamError(res, error);
+    }
+  };
+}
+
+export { validateUsername };
+export default createHandler();

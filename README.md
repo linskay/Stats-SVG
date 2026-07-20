@@ -1,6 +1,6 @@
 # <i class="fa-brands fa-github fa-spin"></i>Stats SVG<i class="fa-solid fa-chart-line fa-fade"></i>
 
-*A highly customizable stats SVG generator*
+_A highly customizable stats SVG generator_
 
 This project generates a visually appealing, highly customizable SVG image displaying GitHub user statistics. It's designed to be embedded in GitHub profiles or other web pages to showcase a user's GitHub activity and contributions.
 
@@ -14,6 +14,19 @@ This project generates a visually appealing, highly customizable SVG image displ
 - Supports custom color schemes, configurations, and animated elements
 - For ranking and language usage calculation, this repo uses the same algorithm as arguably the most famous README card repo on GitHub, [anuraghazra/github-readme-stats](https://github.com/anuraghazra/github-readme-stats), to maintain consistency with the same standard.
 
+## Requirements and local checks
+
+Use **Node.js 24 or newer** (the supported range is also enforced by the `engines` field in `package.json`). Install dependencies and run the project checks with:
+
+```bash
+npm install
+npm test
+npm run lint
+npm run format:check
+```
+
+Use `npm run format` to apply formatting changes.
+
 ## Deployment
 
 Since the GitHub API only allows 5k requests per hour, the api provided by this repo could possibly hit the rate limiter. You can host your own instance of this repo on Vercel to avoid the rate limiter.
@@ -25,6 +38,7 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
  <summary><b>Manual Deployment</b></summary>
 
 #### 1. Fork and Prepare the Repository
+
 1. Fork this repository to your GitHub account
 2. [Create a Personal Access Token (PAT)](https://github.com/settings/tokens/new)
    - Set the token name (e.g., "stats-svg")
@@ -32,6 +46,7 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
    - Copy the generated token (you won't see it again so save it!)
 
 #### 2. Deploy to Vercel
+
 1. Visit [Vercel](https://vercel.com/)
 2. Sign up/Log in with your GitHub account
 3. From your Vercel dashboard:
@@ -40,6 +55,7 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
    - Click `Import`
 
 #### 3. Configure Environment Variables
+
 1. In the project configuration screen:
    - Expand the `Environment Variables` section
    - Add a new variable:
@@ -48,10 +64,12 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
 2. Click `Deploy`
 
 #### 4. Using Your Instance
+
 - Once deployed, Vercel will provide you with a domain (e.g., `your-project.vercel.app`)
 - Use any of the endpoints listed in the [API endpoints](#api-endpoints) section, replacing the example domain with your deployment domain.
 
 #### Troubleshooting
+
 - For issues, check Vercel's deployment logs or open an issue in this repository
 
 </details>
