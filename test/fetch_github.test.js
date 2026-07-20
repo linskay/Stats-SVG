@@ -4,9 +4,12 @@ import fetchGitHubData from "../src/fetch/fetch_github.js";
 import { githubClient } from "../src/fetch/http.js";
 
 test("builds GitHub statistics for a user from the shared HTTP client", async () => {
-  const originalPost = githubClient.post;
+  const originalRequest = githubClient.request;
   const queries = [];
-  githubClient.post = async (_url, { query }) => {
+  const requests = [];
+  githubClient.request = async ({ data, signal, timeout }) => {
+    requests.push({ signal, timeout });
+    const { query } = data;
     queries.push(query);
 
     if (query.includes("query userInfo")) {
@@ -134,7 +137,11 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
       },
     );
     assert.ok(queries.some((query) => query.includes("createdAt")));
+    assert.ok(
+      requests.every((request) => request.signal === requests[0].signal),
+    );
+    assert.ok(requests.every((request) => request.timeout <= 7_000));
   } finally {
-    githubClient.post = originalPost;
+    githubClient.request = originalRequest;
   }
 });

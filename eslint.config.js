@@ -9,6 +9,8 @@ export default [
         process: "readonly",
         URL: "readonly",
         setTimeout: "readonly",
+        clearTimeout: "readonly",
+        AbortController: "readonly",
       },
     },
     rules: {

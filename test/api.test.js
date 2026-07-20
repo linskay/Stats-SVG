@@ -75,3 +75,25 @@ test("returns 404 for a missing upstream user and 502 for an upstream failure", 
     [502, "Upstream service error"],
   );
 });
+
+test("returns 503 when an upstream request is temporarily unavailable", async () => {
+  const handler = createHandler({
+    githubFetcher: async () => {
+      const error = new Error("temporary upstream failure");
+      error.status = 503;
+      throw error;
+    },
+    maxRetries: 1,
+  });
+  const res = response();
+
+  await handler(
+    { params: { action: "github-status" }, query: { username: "octocat" } },
+    res,
+  );
+
+  assert.deepEqual(
+    [res.statusCode, res.body],
+    [503, "Upstream service temporarily unavailable"],
+  );
+});
