@@ -1,17 +1,15 @@
-name: CI
+name: Quality
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
+  push: { branches: [main] }
 
 permissions:
   contents: read
 
 jobs:
-  check:
-    name: check
+  quality:
+    name: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

@@ -23,7 +23,7 @@ npm run check
    `main`.
 2. Включите **Require a pull request before merging**, **Require approvals** и
    **Require status checks to pass before merging**.
-3. Выберите обязательные проверки `check`, `conventional-commit` и
+3. Выберите обязательные проверки `quality`, `conventional-commit` и
    `Analyze JavaScript`; включите **Require branches to be up to date**.
 4. Запретите force push и удаление ветки. Не включайте bypass для
    администраторов, если CI должен быть непреодолимым барьером.
@@ -36,19 +36,16 @@ npm run check
 
 ## Vercel
 
-1. В Vercel импортируйте репозиторий через GitHub integration и задайте
-   **Production Branch** = `main`.
+1. В Vercel импортируйте проект или создайте его через CLI, а затем сохраните
+   `VERCEL_TOKEN`, `VERCEL_ORG_ID` и `VERCEL_PROJECT_ID` в GitHub Actions
+   secrets.
 2. Сохраните требуемые production environment variables, включая
    `GITHUB_TOKEN` и, при необходимости, `STEAM_API_KEY`, только в Vercel.
-3. После merge в `main` Vercel создаст production deployment автоматически.
-   Workflow `Vercel deployment smoke test` проверит публичный LeetCode endpoint
-   только после успешного production deployment.
-
-Git integration — намеренно выбранный способ деплоя. Он даёт preview для PR и
-production для `main` без дублирования Vercel credentials в GitHub Actions. Если
-нужен строгий gate «deploy только после CI», отключите Git deployment в Vercel и
-добавьте отдельный workflow с Vercel CLI, `VERCEL_TOKEN`, `VERCEL_ORG_ID` и
-`VERCEL_PROJECT_ID`.
+3. Workflow `Deploy production` запускается только после успешного workflow
+   `Quality` для `main`, собирает и публикует production deployment через
+   Vercel CLI. После публикации он запрашивает
+   `/api/github-status?username=octocat` и проверяет HTTP 200, заголовок
+   `image/svg+xml` и SVG-тело.
 
 ## Релизы
 

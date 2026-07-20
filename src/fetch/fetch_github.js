@@ -9,9 +9,6 @@ import {
   upstreamRequest,
 } from "./http.js";
 import config from "../../config.js";
-import pkg from "http2-wrapper";
-const { http2Adapter } = pkg;
-const http2Axios = axios.create({ adapter: http2Adapter });
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GRAPHQL_QUERY_USER_INFO = `
@@ -98,17 +95,15 @@ const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
   }
 `;
 
-// Add a bounded in-memory cache with a two-minute TTL.
-const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000;
+const cache = createTtlCache({ ttl: 2 * 60 * 1000, maxSize: 100 });
+const ALL_TIME_CONTRIBUTIONS_CONCURRENCY = 3;
 
 async function fetchGitHubData(username) {
   console.log("Fetching data for", username);
 
-  const cachedData = cache.get(username);
-  if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
-    return cachedData.data;
-  }
+  const cacheKey = `github:${username.trim().toLowerCase()}`;
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) return cachedData;
 
   const url = "https://api.github.com/graphql";
   const headers = {
@@ -302,7 +297,7 @@ async function fetchGitHubData(username) {
     console.timeEnd("Data Processing");
 
     // Cache the results
-    cache.set(username, { data: stats, timestamp: Date.now() });
+    cache.set(cacheKey, stats);
 
     return stats;
   } catch (error) {
