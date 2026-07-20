@@ -6,33 +6,16 @@ import config from "../../config.js";
 import pkg from "http2-wrapper";
 const { http2Adapter } = pkg;
 
+const { http2Adapter } = pkg;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const http2Axios = axios.create({
-  adapter: http2Adapter,
-});
+const http2Axios = axios.create({ adapter: http2Adapter });
 
 const GRAPHQL_QUERY_USER_INFO = `
   query userInfo($login: String!) {
     user(login: $login) {
       name
       login
-      createdAt
       followers {
-        totalCount
-      }
-      contributionsCollection {
-        totalCommitContributions
-        totalPullRequestContributions
-        totalPullRequestReviewContributions
-        totalIssueContributions
-      }
-      pullRequests(states: MERGED) {
-        totalCount
-      }
-      repositoryDiscussions {
-        totalCount
-      }
-      repositoryDiscussionComments(onlyAnswers: true) {
         totalCount
       }
     }
@@ -42,11 +25,7 @@ const GRAPHQL_QUERY_USER_INFO = `
 const GRAPHQL_QUERY_REPOSITORIES = `
   query userRepositories($login: String!, $after: String) {
     user(login: $login) {
-      repositoriesContributedTo(contributionTypes: [COMMIT, ISSUE, PULL_REQUEST, REPOSITORY], first: 100, includeUserRepositories: true) {
-        totalCount
-      }
-      repositories(first: 100, after: $after, ownerAffiliations: OWNER, isFork: false, orderBy: {field: CREATED_AT, direction: DESC}) {
-        totalCount
+      repositories(first: 100, after: $after, ownerAffiliations: OWNER, isFork: false, visibility: PUBLIC, orderBy: {field: CREATED_AT, direction: DESC}) {
         pageInfo {
           hasNextPage
           endCursor
@@ -71,45 +50,12 @@ const GRAPHQL_QUERY_REPOSITORIES = `
   }
 `;
 
-const GRAPHQL_QUERY_CONTRIBUTIONS_CALENDAR = `
-  query userContributions($login: String!, $from: DateTime!, $to: DateTime!) {
-    user(login: $login) {
-      contributionsCollection(from: $from, to: $to) {
-        contributionCalendar {
-          totalContributions
-          weeks {
-            contributionDays {
-              date
-              contributionCount
-            }
-          }
-        }
-      }
-    }
-  }
-`;
-
-const GRAPHQL_QUERY_CONTRIBUTIONS_BY_YEAR = `
-  query userContributionsByYear($login: String!, $from: DateTime!, $to: DateTime!) {
-    user(login: $login) {
-      contributionsCollection(from: $from, to: $to) {
-        totalCommitContributions
-        totalPullRequestContributions
-        totalPullRequestReviewContributions
-        totalIssueContributions
-      }
-    }
-  }
-`;
-
-// Add a simple in-memory cache
 const cache = new Map();
-const CACHE_TTL = 2 * 60 * 1000; // 2 minutes in milliseconds
+const CACHE_TTL = 2 * 60 * 1000;
 
 async function fetchGitHubData(username) {
   console.log("Fetching data for", username);
 
-  // Check if we have cached data
   const cachedData = cache.get(username);
   if (cachedData && Date.now() - cachedData.timestamp < CACHE_TTL) {
     return cachedData.data;
@@ -140,10 +86,9 @@ async function fetchGitHubData(username) {
     };
 
     const fetchRepositories = async () => {
-      let allRepositories = [];
+      const allRepositories = [];
       let hasNextPage = true;
       let after = null;
-      let contributedToCount = 0;
 
       while (hasNextPage) {
         const response = await http2Axios.post(
@@ -156,18 +101,14 @@ async function fetchGitHubData(username) {
         );
 
         const data = response.data?.data?.user;
+
         if (!data) {
           throw new Error("No user data returned from GitHub API");
         }
 
-        allRepositories = allRepositories.concat(data.repositories.nodes);
+        allRepositories.push(...data.repositories.nodes);
         hasNextPage = data.repositories.pageInfo.hasNextPage;
         after = data.repositories.pageInfo.endCursor;
-
-        // Only set this on the first iteration
-        if (contributedToCount === 0) {
-          contributedToCount = data.repositoriesContributedTo.totalCount;
-        }
       }
 
       return {
@@ -312,9 +253,7 @@ async function fetchGitHubData(username) {
 
     console.timeEnd("Data Processing");
 
-    // Cache the results
     cache.set(username, { data: stats, timestamp: Date.now() });
-
     return stats;
   } catch (error) {
     console.error("Error fetching data from GitHub:", error);
