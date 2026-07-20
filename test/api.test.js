@@ -76,10 +76,10 @@ test("returns 404 for a missing upstream user and 502 for an upstream failure", 
   );
 });
 
-test("returns 503 for a temporary upstream error", async () => {
+test("returns 503 when an upstream request is temporarily unavailable", async () => {
   const handler = createHandler({
     githubFetcher: async () => {
-      const error = new Error("GitHub API is temporarily unavailable");
+      const error = new Error("temporary upstream failure");
       error.status = 503;
       throw error;
     },

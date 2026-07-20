@@ -6,11 +6,10 @@ import { githubClient } from "../src/fetch/http.js";
 test("builds GitHub statistics for a user from the shared HTTP client", async () => {
   const originalRequest = githubClient.request;
   const queries = [];
-  githubClient.request = async ({ data: { query }, signal }) => {
-    assert.ok(
-      signal,
-      "each GitHub request receives the provider deadline signal",
-    );
+  const requests = [];
+  githubClient.request = async ({ data, signal, timeout }) => {
+    requests.push({ signal, timeout });
+    const { query } = data;
     queries.push(query);
 
     if (query.includes("query userInfo")) {
@@ -138,6 +137,10 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
       },
     );
     assert.ok(queries.some((query) => query.includes("createdAt")));
+    assert.ok(
+      requests.every((request) => request.signal === requests[0].signal),
+    );
+    assert.ok(requests.every((request) => request.timeout <= 7_000));
   } finally {
     githubClient.request = originalRequest;
   }

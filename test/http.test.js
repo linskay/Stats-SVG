@@ -1,48 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import axios from "axios";
 import {
-  createRequestDeadline,
   UpstreamRequestError,
+  createRequestDeadline,
   upstreamRequest,
 } from "../src/fetch/http.js";
 
-test("maps an upstream request timeout to a temporary-unavailable error", async () => {
-  const deadline = createRequestDeadline(1_000);
-  const client = {
-    defaults: { timeout: 500 },
-    request: async () => {
-      const error = new Error("timeout");
-      error.code = "ECONNABORTED";
-      throw error;
-    },
-  };
+function clientWith(adapter) {
+  return axios.create({ timeout: 100, adapter });
+}
 
-  try {
-    await assert.rejects(
-      upstreamRequest(
-        client,
-        { method: "get", url: "https://example.test" },
-        deadline,
-        "Example API",
-      ),
-      (error) => error instanceof UpstreamRequestError && error.status === 503,
-    );
-  } finally {
-    deadline.dispose();
-  }
-});
-
-test("deadline aborts an in-flight request and maps it to a gateway timeout", async () => {
+test("deadline aborts outstanding upstream requests after its timeout", async () => {
   const deadline = createRequestDeadline(10);
-  const client = {
-    defaults: { timeout: 1_000 },
-    request: ({ signal }) =>
+  const client = clientWith(
+    (config) =>
       new Promise((_, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), {
-          once: true,
-        });
+        config.signal.addEventListener("abort", () =>
+          reject(config.signal.reason),
+        );
       }),
-  };
+  );
 
   try {
     await assert.rejects(
@@ -50,7 +28,7 @@ test("deadline aborts an in-flight request and maps it to a gateway timeout", as
         client,
         { method: "get", url: "https://example.test" },
         deadline,
-        "Example API",
+        "Test API",
       ),
       (error) => error instanceof UpstreamRequestError && error.status === 504,
     );
@@ -60,9 +38,32 @@ test("deadline aborts an in-flight request and maps it to a gateway timeout", as
   }
 });
 
-test("disposing a deadline cancels its scheduled abort", async () => {
+test("disposing a deadline cancels its timeout timer", async () => {
   const deadline = createRequestDeadline(10);
   deadline.dispose();
-  await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(deadline.signal.aborted, false);
+});
+
+test("maps a temporary upstream timeout to HTTP 503", async () => {
+  const deadline = createRequestDeadline();
+  const client = clientWith(async () => {
+    const error = new Error("upstream timed out");
+    error.code = "ETIMEDOUT";
+    throw error;
+  });
+
+  try {
+    await assert.rejects(
+      upstreamRequest(
+        client,
+        { method: "get", url: "https://example.test" },
+        deadline,
+        "Test API",
+      ),
+      (error) => error instanceof UpstreamRequestError && error.status === 503,
+    );
+  } finally {
+    deadline.dispose();
+  }
 });
