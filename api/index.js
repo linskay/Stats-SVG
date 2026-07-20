@@ -25,7 +25,7 @@ async function fetchWithRetry(fetcher, username, maxRetries, retryDelay) {
 }
 
 function sendUpstreamError(res, error) {
-  const status = error.response?.status;
+  const status = error.status ?? error.response?.status;
   if (status === 404) {
     return res.status(404).send("User not found");
   }
@@ -35,6 +35,9 @@ function sendUpstreamError(res, error) {
       .send(
         "Service temporarily unavailable due to upstream rate limits. Please try again later.",
       );
+  }
+  if (status === 503 || status === 504) {
+    return res.status(status).send("Upstream service temporarily unavailable");
   }
   if (status) {
     return res.status(502).send("Upstream service error");

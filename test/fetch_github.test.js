@@ -4,9 +4,13 @@ import fetchGitHubData from "../src/fetch/fetch_github.js";
 import { githubClient } from "../src/fetch/http.js";
 
 test("builds GitHub statistics for a user from the shared HTTP client", async () => {
-  const originalPost = githubClient.post;
+  const originalRequest = githubClient.request;
   const queries = [];
-  githubClient.post = async (_url, { query }) => {
+  githubClient.request = async ({ data: { query }, signal }) => {
+    assert.ok(
+      signal,
+      "each GitHub request receives the provider deadline signal",
+    );
     queries.push(query);
 
     if (query.includes("query userInfo")) {
@@ -135,6 +139,6 @@ test("builds GitHub statistics for a user from the shared HTTP client", async ()
     );
     assert.ok(queries.some((query) => query.includes("createdAt")));
   } finally {
-    githubClient.post = originalPost;
+    githubClient.request = originalRequest;
   }
 });
