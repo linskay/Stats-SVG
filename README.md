@@ -49,15 +49,51 @@ Since the GitHub API only allows 5k requests per hour, the api provided by this 
 
 #### 4. Using Your Instance
 - Once deployed, Vercel will provide you with a domain (e.g., `your-project.vercel.app`)
-- You can use your instance by replacing the domain in the API URL:
-  ```
-  https://your-project.vercel.app/api/github-status?username=YOUR_GITHUB_USERNAME
-  ```
+- Use any of the endpoints listed in the [API endpoints](#api-endpoints) section, replacing the example domain with your deployment domain.
 
 #### Troubleshooting
 - For issues, check Vercel's deployment logs or open an issue in this repository
 
 </details>
+
+## API endpoints
+
+All endpoints accept a required `username` query parameter. Replace
+`your-project.vercel.app` with the domain of your Vercel deployment.
+
+| Endpoint | Response | Required configuration |
+| --- | --- | --- |
+| `/api/github-status` | GitHub statistics as an SVG image. | `GITHUB_TOKEN` |
+| `/api/leetcode-status` | LeetCode profile, skill, language, and contest statistics as JSON. | None |
+| `/api/steam-status` | Steam profile and game-play statistics as JSON. | `STEAM_API_KEY` |
+
+### GitHub statistics
+
+```text
+GET https://your-project.vercel.app/api/github-status?username=octocat
+```
+
+Returns an `image/svg+xml` response that can be embedded directly in a README:
+
+```md
+![GitHub Stats](https://your-project.vercel.app/api/github-status?username=octocat)
+```
+
+### LeetCode statistics
+
+```text
+GET https://your-project.vercel.app/api/leetcode-status?username=leetcode
+```
+
+Returns JSON containing the account username, solved-problem skill groups, language statistics, and contest data.
+
+### Steam status
+
+```text
+GET https://your-project.vercel.app/api/steam-status?username=76561198000000000
+```
+
+For Steam, `username` must be the user's numeric SteamID. Set `STEAM_API_KEY` in your Vercel project environment variables before making this request. The response is JSON with profile, status, owned-game, and playtime data.
 
 ## Customization
 
