@@ -4,7 +4,14 @@ on:
   push:
     branches:
       - main
+  # Manual runs never publish: they validate the semantic-release setup in dry-run mode.
   workflow_dispatch:
+    inputs:
+      validate:
+        description: Validate the release configuration without publishing.
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
