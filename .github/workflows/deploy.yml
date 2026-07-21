@@ -18,7 +18,7 @@ jobs:
       name: production
       url: ${{ steps.vercel.outputs.url }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v5
@@ -27,20 +27,20 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Pull Vercel production configuration
-        run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: npx --no-install vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       - name: Build production deployment
-        run: npx vercel build --prod --token="$VERCEL_TOKEN"
+        run: npx --no-install vercel build --prod --token="$VERCEL_TOKEN"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       - name: Deploy to Vercel production
         id: vercel
-        run: echo "url=$(npx vercel deploy --prebuilt --prod --token=\"$VERCEL_TOKEN\")" >> "$GITHUB_OUTPUT"
+        run: echo "url=$(npx --no-install vercel deploy --prebuilt --prod --token=\"$VERCEL_TOKEN\")" >> "$GITHUB_OUTPUT"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
