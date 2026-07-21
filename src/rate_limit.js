@@ -16,12 +16,18 @@ export const rateLimitConfig = Object.freeze(
 
 function clientKey(request) {
   const forwarded = request.headers?.["x-forwarded-for"];
-  const ip = typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip;
+  const ip =
+    typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip;
   return ip || "anonymous";
 }
 
 function retryAfter(seconds) {
-  return Math.max(1, Math.ceil(seconds));
+  return Math.max(1, Math.ceil(Number(seconds) || 1));
+}
+
+export function sendRateLimitExceeded(response, seconds) {
+  response.setHeader("Retry-After", String(retryAfter(seconds)));
+  return response.status(429).send("Too Many Requests");
 }
 
 export function createMemoryRateLimiter({ now = () => Date.now() } = {}) {
@@ -35,14 +41,18 @@ export function createMemoryRateLimiter({ now = () => Date.now() } = {}) {
       const timestamp = now();
       const current = requests.get(bucketKey);
       const windowMs = config.windowSeconds * 1_000;
-      const bucket = !current || current.resetAt <= timestamp
-        ? { count: 0, resetAt: timestamp + windowMs }
-        : current;
+      const bucket =
+        !current || current.resetAt <= timestamp
+          ? { count: 0, resetAt: timestamp + windowMs }
+          : current;
       bucket.count += 1;
       requests.set(bucketKey, bucket);
       return bucket.count <= config.limit
         ? { success: true }
-        : { success: false, retryAfter: retryAfter((bucket.resetAt - timestamp) / 1_000) };
+        : {
+            success: false,
+            retryAfter: retryAfter((bucket.resetAt - timestamp) / 1_000),
+          };
     },
   };
 }
@@ -61,7 +71,9 @@ export function createDistributedRateLimiter({
   fetcher = globalThis.fetch,
 } = {}) {
   if (!url || !token) {
-    throw new Error("KV_REST_API_URL and KV_REST_API_TOKEN are required on Vercel production");
+    throw new Error(
+      "KV_REST_API_URL and KV_REST_API_TOKEN are required on Vercel production",
+    );
   }
 
   return {
@@ -71,10 +83,16 @@ export function createDistributedRateLimiter({
       const redisKey = `rate-limit:${action}:${key}:${Math.floor(Date.now() / (config.windowSeconds * 1_000))}`;
       const response = await fetcher(`${url.replace(/\/$/, "")}/pipeline`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify([["EVAL", FIXED_WINDOW_SCRIPT, 1, redisKey, config.windowSeconds]]),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify([
+          ["EVAL", FIXED_WINDOW_SCRIPT, 1, redisKey, config.windowSeconds],
+        ]),
       });
-      if (!response.ok) throw new Error(`KV rate limit request failed with ${response.status}`);
+      if (!response.ok)
+        throw new Error(`KV rate limit request failed with ${response.status}`);
       const [result] = await response.json();
       const [count, ttl] = result.result;
       return count <= config.limit
@@ -92,12 +110,16 @@ export function createVercelRateLimiter() {
 
 export function createRateLimitMiddleware(limiter) {
   return async function rateLimitMiddleware(req, res, next) {
-    const result = await limiter.limit(req.params.action, clientKey(req));
-    if (!result.success) {
-      res.setHeader("Retry-After", String(result.retryAfter));
-      return res.status(429).send("Too Many Requests");
+    try {
+      const result = await limiter.limit(req.params.action, clientKey(req));
+      if (!result.success) {
+        return sendRateLimitExceeded(res, result.retryAfter);
+      }
+      return next();
+    } catch (error) {
+      console.error("Rate limit service error:", error);
+      return res.status(503).send("Rate limit service temporarily unavailable");
     }
-    return next();
   };
 }
 
