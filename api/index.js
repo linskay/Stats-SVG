@@ -3,7 +3,11 @@ import fetchLeetCodeStats from "../src/fetch/fetch_leetcode.js";
 import fetchSteamStatus from "../src/fetch/fetch_steam.js";
 import { REQUEST_DEADLINE_MS } from "../src/fetch/http.js";
 import renderStats from "../src/render/render_github.js";
-import { createVercelRateLimiter, clientKey } from "../src/rate_limit.js";
+import {
+  createVercelRateLimiter,
+  clientKey,
+  sendRateLimitExceeded,
+} from "../src/rate_limit.js";
 
 const GITHUB_LOGIN_PATTERN = /^(?!-)(?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){1,39}$/;
 const LEETCODE_USERNAME_PATTERN = /^[A-Za-z0-9_-]{1,30}$/;
@@ -188,12 +192,13 @@ export function createHandler({
       try {
         const result = await rateLimiter.limit(action, clientKey(req));
         if (!result.success) {
-          res.setHeader("Retry-After", String(result.retryAfter));
-          return res.status(429).send("Too Many Requests");
+          return sendRateLimitExceeded(res, result.retryAfter);
         }
       } catch (error) {
         console.error("Rate limit service error:", error);
-        return res.status(503).send("Rate limit service temporarily unavailable");
+        return res
+          .status(503)
+          .send("Rate limit service temporarily unavailable");
       }
     }
 

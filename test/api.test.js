@@ -8,6 +8,7 @@ import {
   validateSteamId,
 } from "../api/index.js";
 import { UpstreamRequestError } from "../src/fetch/http.js";
+import { createMemoryRateLimiter } from "../src/rate_limit.js";
 
 function response() {
   return {
@@ -95,6 +96,57 @@ test("rate limit rejects requests before a GitHub provider fetch or retry", asyn
     [429, "Too Many Requests", "42"],
   );
   assert.equal(calls, 0);
+  assert.equal(sleeps, 0);
+});
+
+test("exceeded endpoint limits do not call any provider fetcher or schedule retries", async () => {
+  const limiter = createMemoryRateLimiter();
+  const calls = { github: 0, leetcode: 0, steam: 0 };
+  let sleeps = 0;
+  const handler = createHandler({
+    githubFetcher: async () => {
+      calls.github += 1;
+      throw { response: { status: 503 } };
+    },
+    leetcodeFetcher: async () => {
+      calls.leetcode += 1;
+      throw { response: { status: 503 } };
+    },
+    steamFetcher: async () => {
+      calls.steam += 1;
+      throw { response: { status: 503 } };
+    },
+    maxRetries: 5,
+    sleep: async () => {
+      sleeps += 1;
+    },
+    rateLimiter: limiter,
+  });
+  const endpoints = [
+    ["github-status", "octocat", "github", 60],
+    ["leetcode-status", "leetcode", "leetcode", 30],
+    ["steam-status", "76561198000000000", "steam", 20],
+  ];
+
+  for (const [action, username, provider, limit] of endpoints) {
+    const key = `limited-${provider}`;
+    for (let index = 0; index < limit; index += 1) {
+      await limiter.limit(action, key);
+    }
+
+    const res = response();
+    await handler(
+      {
+        params: { action },
+        query: { username },
+        headers: { "x-forwarded-for": key },
+      },
+      res,
+    );
+    assert.deepEqual([res.statusCode, res.headers["Retry-After"]], [429, "60"]);
+  }
+
+  assert.deepEqual(calls, { github: 0, leetcode: 0, steam: 0 });
   assert.equal(sleeps, 0);
 });
 
