@@ -160,19 +160,19 @@ test("Vercel production fails closed when KV credentials are missing", () => {
 test(
   "distributed requests from the same client share one Redis window key",
   async () => {
-  const keys = [];
-  const limiter = createDistributedRateLimiter({
-    url: "https://kv.example.com",
-    token: "secret",
-    fetcher: async (_url, options) => {
-      const [[, , , key]] = JSON.parse(options.body);
-      keys.push(key);
-      return { ok: true, json: async () => [{ result: [keys.length, 60] }] };
-    },
-  });
-  await limiter.limit("github-status", "192.0.2.40");
-  await limiter.limit("github-status", "192.0.2.40");
-  assert.equal(keys.length, 2);
-  assert.equal(keys[0], keys[1]);
+    const keys = [];
+    const limiter = createDistributedRateLimiter({
+      url: "https://kv.example.com",
+      token: "secret",
+      fetcher: async (_url, options) => {
+        const [[, , , key]] = JSON.parse(options.body);
+        keys.push(key);
+        return { ok: true, json: async () => [{ result: [keys.length, 60] }] };
+      },
+    });
+    await limiter.limit("github-status", "192.0.2.40");
+    await limiter.limit("github-status", "192.0.2.40");
+    assert.equal(keys.length, 2);
+    assert.equal(keys[0], keys[1]);
   },
 );
