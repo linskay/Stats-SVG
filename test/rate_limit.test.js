@@ -91,8 +91,9 @@ test("distributed limiter uses an atomic KV pipeline and reports its TTL", async
   assert.equal(windowSeconds, 60);
 });
 
-
-test("client IP ignores spoofed X-Forwarded-For and uses the transport IP", () => {
+test(
+  "client IP ignores spoofed X-Forwarded-For and uses the transport IP",
+  () => {
   assert.equal(
     clientKey({
       headers: { "x-forwarded-for": "198.51.100.99, 203.0.113.7" },
@@ -112,9 +113,12 @@ test("client IP ignores spoofed X-Forwarded-For and uses the transport IP", () =
     clientKey({ headers: { "x-forwarded-for": "198.51.100.99" } }),
     "anonymous",
   );
-});
+  },
+);
 
-test("independent client IPs receive separate buckets; spoofed headers cannot switch buckets", async () => {
+test(
+  "independent client IPs receive separate buckets; spoofed headers cannot switch buckets",
+  async () => {
   const limiter = createMemoryRateLimiter();
   const clientA = clientKey({
     ip: "192.0.2.1",
@@ -131,4 +135,5 @@ test("independent client IPs receive separate buckets; spoofed headers cannot sw
     (await limiter.limit("github-status", clientA)).success,
     true,
   );
-});
+  },
+);
