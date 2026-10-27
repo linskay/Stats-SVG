@@ -39,13 +39,22 @@ npm run check
 1. В Vercel импортируйте проект или создайте его через CLI, а затем сохраните
    `VERCEL_TOKEN`, `VERCEL_ORG_ID` и `VERCEL_PROJECT_ID` в GitHub Actions
    secrets.
-2. Сохраните требуемые production environment variables, включая
-   `GITHUB_TOKEN` и, при необходимости, `STEAM_API_KEY`, только в Vercel.
-3. Workflow `Deploy production` запускается только после успешного workflow
-   `Quality` для `main`, собирает и публикует production deployment через
-   Vercel CLI. После публикации он запрашивает
-   `/api/github-status?username=octocat` и проверяет HTTP 200, заголовок
-   `image/svg+xml` и SVG-тело.
+2. Сохраните production environment variables в Vercel: `GITHUB_TOKEN`, `KV_REST_API_URL` и `KV_REST_API_TOKEN` (либо совместимую пару `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`); `STEAM_API_KEY` нужен только для Steam endpoint. Не добавляйте значения секретов в GitHub или репозиторий. Без KV/Upstash credentials production API намеренно не запускается; без provider key соответствующий endpoint отвечает HTTP 503.
+3. Workflow `Deploy production` запускается после успешного workflow `Quality`
+   на `main`, собирает и публикует production deployment через Vercel CLI.
+   После публикации он запрашивает `/api/github-status?username=octocat` и
+   проверяет HTTP 200, заголовок `image/svg+xml` и SVG-тело. Убедитесь, что
+   GitHub Actions secrets `VERCEL_TOKEN`, `VERCEL_ORG_ID` и `VERCEL_PROJECT_ID`
+   существуют, а environment `production` разрешает workflow deployment.
+
+## Rate limiting и IP
+
+Код не принимает `X-Forwarded-For` напрямую как идентификатор клиента, поскольку
+этот заголовок можно подделать, если доверять ему без проверки прокси. В API
+используется `req.ip`, а при его отсутствии — адрес сокета. При подключении нового
+reverse proxy проверьте, что платформа корректно выставляет `req.ip`; не включайте
+`trust proxy = true` для произвольных прокси. Production лимиты хранятся в KV/Redis
+и общие для инстансов, локальный Express использует память одного процесса.
 
 ## Релизы
 
