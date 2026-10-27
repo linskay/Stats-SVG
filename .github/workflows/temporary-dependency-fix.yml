@@ -1,0 +1,28 @@
+name: Temporary dependency fix validation
+on:
+  push:
+    branches: [fix/sync-package-lock]
+    paths:
+      - .github/workflows/temporary-dependency-fix.yml
+      - package.json
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Resolve lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Report full audit
+        run: |
+          npm audit --json > /tmp/audit.json || true
+          node --input-type=module -e 'import fs from "node:fs"; const a=JSON.parse(fs.readFileSync("/tmp/audit.json","utf8")); console.log("TOTAL",JSON.stringify(a.metadata?.vulnerabilities)); for (const [name,v] of Object.entries(a.vulnerabilities||{})) console.log("ITEM",JSON.stringify({name,severity:v.severity,isDirect:v.isDirect,range:v.range,fixAvailable:v.fixAvailable,nodes:v.nodes}));'
+      - name: Clean install and checks
+        run: |
+          npm ci
+          npm run check
