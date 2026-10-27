@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import http2Wrapper from "http2-wrapper";
 import {
   createRequestDeadline,
   githubClient,
@@ -83,6 +82,6 @@ test("converts an upstream timeout into a temporary-unavailable error", async ()
   }
 });
 
-test("GitHub Axios client keeps the HTTP/2 adapter configured", () => {
-  assert.equal(githubClient.defaults.adapter, http2Wrapper.http2Adapter);
+test("GitHub Axios client keeps native HTTP/2 enabled", () => {
+  assert.equal(githubClient.defaults.httpVersion, 2);
 });
