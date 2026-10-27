@@ -14,11 +14,14 @@ export const rateLimitConfig = Object.freeze(
   ),
 );
 
-function clientKey(request) {
-  const forwarded = request.headers?.["x-forwarded-for"];
+export function clientKey(request) {
+  // Never trust X-Forwarded-For directly: clients can forge it unless every
+  // proxy hop and Express trust-proxy setting is explicitly controlled.
   const ip =
-    typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip;
-  return ip || "anonymous";
+    request.ip ??
+    request.socket?.remoteAddress ??
+    request.connection?.remoteAddress;
+  return typeof ip === "string" && ip.length > 0 ? ip : "anonymous";
 }
 
 function retryAfter(seconds) {
