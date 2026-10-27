@@ -61,7 +61,11 @@ function convertNumberUnit(number) {
 }
 
 async function calculateGithubUrl(stats) {
-  return `https://github.com/${encodeURIComponent(String(stats.login ?? ""))}`;
+  const login = encodeURIComponent(String(stats.login ?? "")).replace(
+    /[!\x27()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `https://github.com/${login}`;
 }
 
 async function calculateSvgConfig(config) {
