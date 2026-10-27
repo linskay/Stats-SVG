@@ -1,0 +1,51 @@
+name: Temporary dependency audit
+
+on:
+  push:
+    branches:
+      - fix/sync-package-lock
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Format temporary workflow
+        run: npx prettier --write .github/workflows/temporary-dependency-audit.yml
+      - name: Regenerate lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - run: npm ci
+      - name: Apply non-breaking security fixes
+        run: npm audit fix || true
+      - name: Verify code and tests
+        run: npm run check
+      - name: Report dependency audit
+        run: |
+          npm audit --omit=dev --json > production-audit.json || true
+          npm audit --json > audit.json || true
+          node --input-type=module -e '
+            import fs from "node:fs";
+            for (const [file, label] of [["production-audit.json", "PRODUCTION_SUMMARY"], ["audit.json", "SUMMARY"]]) {
+              const report = JSON.parse(fs.readFileSync(file, "utf8"));
+              console.log(label, JSON.stringify(report.metadata?.vulnerabilities ?? {}));
+            }
+          '
+          rm -f production-audit.json audit.json
+      - name: Commit dependency updates
+        run: |
+          if ! git diff --quiet -- package.json package-lock.json .github/workflows/temporary-dependency-audit.yml; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package.json package-lock.json .github/workflows/temporary-dependency-audit.yml
+            git commit -m "fix: update npm dependencies and audit security"
+            git push
+          else
+            echo "No dependency changes were needed."
+          fi
