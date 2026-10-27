@@ -14,11 +14,14 @@ export const rateLimitConfig = Object.freeze(
   ),
 );
 
-function clientKey(request) {
-  const forwarded = request.headers?.["x-forwarded-for"];
+export function clientKey(request) {
+  // Never trust X-Forwarded-For directly: clients can forge it unless every
+  // proxy hop and Express trust-proxy setting is explicitly controlled.
   const ip =
-    typeof forwarded === "string" ? forwarded.split(",")[0].trim() : request.ip;
-  return ip || "anonymous";
+    request.ip ??
+    request.socket?.remoteAddress ??
+    request.connection?.remoteAddress;
+  return typeof ip === "string" && ip.length > 0 ? ip : "anonymous";
 }
 
 function retryAfter(seconds) {
@@ -80,7 +83,9 @@ export function createDistributedRateLimiter({
     async limit(action, key) {
       const config = rateLimitConfig[action];
       if (!config) return { success: true };
-      const redisKey = `rate-limit:${action}:${key}:${Math.floor(Date.now() / (config.windowSeconds * 1_000))}`;
+      const redisKey = `rate-limit:${action}:${key}:${Math.floor(
+        Date.now() / (config.windowSeconds * 1_000),
+      )}`;
       const response = await fetcher(`${url.replace(/\/$/, "")}/pipeline`, {
         method: "POST",
         headers: {
@@ -122,5 +127,3 @@ export function createRateLimitMiddleware(limiter) {
     }
   };
 }
-
-export { clientKey };

@@ -1,3 +1,1 @@
-chmod +x clean-deps.sh
-sh ./clean-deps.sh
-git add package.json package-lock.json
+npm run check

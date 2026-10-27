@@ -6,6 +6,7 @@ import { createSingleFlight, createTtlCache } from "../utils/cache.js";
 import {
   createRequestDeadline,
   githubClient,
+  UpstreamRequestError,
   upstreamRequest,
 } from "./http.js";
 import config from "../../config.js";

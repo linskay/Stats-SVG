@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createRequestDeadline,
+  githubClient,
   UpstreamRequestError,
   upstreamRequest,
 } from "../src/fetch/http.js";
@@ -79,4 +80,8 @@ test("converts an upstream timeout into a temporary-unavailable error", async ()
   } finally {
     deadline.dispose();
   }
+});
+
+test("GitHub Axios client keeps native HTTP/2 enabled", () => {
+  assert.equal(githubClient.defaults.httpVersion, 2);
 });

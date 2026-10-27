@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   createDistributedRateLimiter,
   createMemoryRateLimiter,
+  createVercelRateLimiter,
+  clientKey,
   createRateLimitMiddleware,
   rateLimitConfig,
 } from "../src/rate_limit.js";
@@ -88,4 +90,85 @@ test("distributed limiter uses an atomic KV pipeline and reports its TTL", async
   assert.equal(keyCount, 1);
   assert.match(redisKey, /^rate-limit:github-status:203\.0\.113\.1:/);
   assert.equal(windowSeconds, 60);
+});
+
+test("client IP ignores spoofed X-Forwarded-For and uses the transport IP", () => {
+  assert.equal(
+    clientKey({
+      headers: { "x-forwarded-for": "198.51.100.99, 203.0.113.7" },
+      ip: "192.0.2.10",
+      socket: { remoteAddress: "192.0.2.11" },
+    }),
+    "192.0.2.10",
+  );
+  assert.equal(
+    clientKey({
+      headers: { "x-forwarded-for": "198.51.100.99" },
+      socket: { remoteAddress: "192.0.2.11" },
+    }),
+    "192.0.2.11",
+  );
+  assert.equal(
+    clientKey({ headers: { "x-forwarded-for": "198.51.100.99" } }),
+    "anonymous",
+  );
+});
+
+test("independent client IPs receive separate buckets; spoofed headers cannot switch buckets", async () => {
+  const limiter = createMemoryRateLimiter();
+  const clientA = clientKey({
+    ip: "192.0.2.1",
+    headers: { "x-forwarded-for": "198.51.100.1" },
+  });
+  const clientB = clientKey({
+    ip: "192.0.2.2",
+    headers: { "x-forwarded-for": "198.51.100.1" },
+  });
+  assert.notEqual(clientA, clientB);
+  assert.equal((await limiter.limit("github-status", clientA)).success, true);
+  assert.equal((await limiter.limit("github-status", clientB)).success, true);
+  assert.equal((await limiter.limit("github-status", clientA)).success, true);
+});
+
+test("Vercel production fails closed when KV credentials are missing", () => {
+  const names = [
+    "VERCEL_ENV",
+    "KV_REST_API_URL",
+    "KV_REST_API_TOKEN",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+  ];
+  const previous = Object.fromEntries(
+    names.map((name) => [name, process.env[name]]),
+  );
+  process.env.VERCEL_ENV = "production";
+  for (const name of names.slice(1)) delete process.env[name];
+  try {
+    assert.throws(
+      () => createVercelRateLimiter(),
+      /KV_REST_API_URL and KV_REST_API_TOKEN are required/,
+    );
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
+});
+
+test("distributed requests from the same client share one Redis window key", async () => {
+  const keys = [];
+  const limiter = createDistributedRateLimiter({
+    url: "https://kv.example.com",
+    token: "secret",
+    fetcher: async (_url, options) => {
+      const [[, , , key]] = JSON.parse(options.body);
+      keys.push(key);
+      return { ok: true, json: async () => [{ result: [keys.length, 60] }] };
+    },
+  });
+  await limiter.limit("github-status", "192.0.2.40");
+  await limiter.limit("github-status", "192.0.2.40");
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
 });

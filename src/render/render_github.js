@@ -16,7 +16,9 @@ const image_base64 = fs.readFileSync(
   "base64",
 );
 // get the dimensions of the image
-const dimensions = sizeOf(path.join(__dirname, "../asset/image.gif"));
+const dimensions = sizeOf(
+  fs.readFileSync(path.join(__dirname, "../asset/image.gif")),
+);
 
 // Load the Base64 encoded fonts
 const fontsBase64 = JSON.parse(
@@ -61,7 +63,11 @@ function convertNumberUnit(number) {
 }
 
 async function calculateGithubUrl(stats) {
-  return `https://github.com/${encodeURIComponent(String(stats.login ?? ""))}`;
+  const login = encodeURIComponent(String(stats.login ?? "")).replace(
+    /[!\x27()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `https://github.com/${login}`;
 }
 
 async function calculateSvgConfig(config) {

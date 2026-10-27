@@ -49,7 +49,9 @@ test("renderStats keeps hostile names and language labels as SVG text", async ()
   assert.doesNotMatch(svg, /<script[\s>]/i);
   assert.doesNotMatch(svg, /<\/text><script/i);
   assert.ok(
-    svg.includes(`https://github.com/${encodeURIComponent(maliciousText)}`),
+    svg.includes(
+      `https://github.com/${encodeURIComponent(maliciousText).replace(/[!\x27()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+    ),
   );
 });
 

@@ -139,7 +139,8 @@ test("exceeded endpoint limits do not call any provider fetcher or schedule retr
       {
         params: { action },
         query: { username },
-        headers: { "x-forwarded-for": key },
+        ip: key,
+        headers: { "x-forwarded-for": "198.51.100.9" },
       },
       res,
     );
@@ -313,4 +314,44 @@ test("identifies only allowed HTTP statuses and network errors as retryable", ()
     false,
   );
   assert.equal(isRetryableError(new TypeError("programming mistake")), false);
+});
+
+test("reports missing default provider credentials as configuration errors", async () => {
+  const originalGitHubToken = process.env.GITHUB_TOKEN;
+  const originalSteamKey = process.env.STEAM_API_KEY;
+  delete process.env.GITHUB_TOKEN;
+  delete process.env.STEAM_API_KEY;
+  try {
+    const github = createHandler();
+    const steam = createHandler();
+    const githubRes = response();
+    const steamRes = response();
+    await github(
+      {
+        params: { action: "github-status" },
+        query: { username: "octocat" },
+      },
+      githubRes,
+    );
+    await steam(
+      {
+        params: { action: "steam-status" },
+        query: { username: "76561198000000000" },
+      },
+      steamRes,
+    );
+    assert.deepEqual(
+      [githubRes.statusCode, githubRes.body],
+      [503, "GitHub API is not configured"],
+    );
+    assert.deepEqual(
+      [steamRes.statusCode, steamRes.body],
+      [503, "Steam API is not configured"],
+    );
+  } finally {
+    if (originalGitHubToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = originalGitHubToken;
+    if (originalSteamKey === undefined) delete process.env.STEAM_API_KEY;
+    else process.env.STEAM_API_KEY = originalSteamKey;
+  }
 });
