@@ -223,7 +223,8 @@ test("does not retry non-retryable 400 and 404 upstream responses", async () => 
 
     assert.equal(calls, 1, `status ${status} must not be retried`);
   }
-});
+  },
+);
 
 test("retries retryable 503 and 429 responses only up to the configured limit", async () => {
   for (const status of [503, 429]) {
@@ -315,8 +316,9 @@ test("identifies only allowed HTTP statuses and network errors as retryable", ()
   assert.equal(isRetryableError(new TypeError("programming mistake")), false);
 });
 
-
-test("reports missing default provider credentials as configuration errors", async () => {
+test(
+  "reports missing default provider credentials as configuration errors",
+  async () => {
   const originalGitHubToken = process.env.GITHUB_TOKEN;
   const originalSteamKey = process.env.STEAM_API_KEY;
   delete process.env.GITHUB_TOKEN;
@@ -331,11 +333,20 @@ test("reports missing default provider credentials as configuration errors", asy
       githubRes,
     );
     await steam(
-      { params: { action: "steam-status" }, query: { username: "76561198000000000" } },
+      {
+        params: { action: "steam-status" },
+        query: { username: "76561198000000000" },
+      },
       steamRes,
     );
-    assert.deepEqual([githubRes.statusCode, githubRes.body], [503, "GitHub API is not configured"]);
-    assert.deepEqual([steamRes.statusCode, steamRes.body], [503, "Steam API is not configured"]);
+    assert.deepEqual(
+      [githubRes.statusCode, githubRes.body],
+      [503, "GitHub API is not configured"],
+    );
+    assert.deepEqual(
+      [steamRes.statusCode, steamRes.body],
+      [503, "Steam API is not configured"],
+    );
   } finally {
     if (originalGitHubToken === undefined) delete process.env.GITHUB_TOKEN;
     else process.env.GITHUB_TOKEN = originalGitHubToken;
