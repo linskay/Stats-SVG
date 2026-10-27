@@ -139,7 +139,9 @@ test("Vercel production fails closed when KV credentials are missing", () => {
     "UPSTASH_REDIS_REST_URL",
     "UPSTASH_REDIS_REST_TOKEN",
   ];
-  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  const previous = Object.fromEntries(
+    names.map((name) => [name, process.env[name]]),
+  );
   process.env.VERCEL_ENV = "production";
   for (const name of names.slice(1)) delete process.env[name];
   try {
@@ -155,7 +157,9 @@ test("Vercel production fails closed when KV credentials are missing", () => {
   }
 });
 
-test("distributed requests from the same client share one Redis window key", async () => {
+test(
+  "distributed requests from the same client share one Redis window key",
+  async () => {
   const keys = [];
   const limiter = createDistributedRateLimiter({
     url: "https://kv.example.com",
@@ -170,4 +174,5 @@ test("distributed requests from the same client share one Redis window key", asy
   await limiter.limit("github-status", "192.0.2.40");
   assert.equal(keys.length, 2);
   assert.equal(keys[0], keys[1]);
-});
+  },
+);
