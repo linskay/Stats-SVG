@@ -139,7 +139,8 @@ test("exceeded endpoint limits do not call any provider fetcher or schedule retr
       {
         params: { action },
         query: { username },
-        headers: { "x-forwarded-for": key },
+        ip: key,
+        headers: { "x-forwarded-for": "198.51.100.9" },
       },
       res,
     );
