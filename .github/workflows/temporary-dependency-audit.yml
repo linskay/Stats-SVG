@@ -16,7 +16,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Regenerate lockfile for manifest updates
+        run: npm install --package-lock-only --ignore-scripts
       - run: npm ci
+      - name: Check latest Vercel CLI release
+        run: npm view vercel version
       - name: Apply non-breaking security fixes
         run: npm audit fix || true
       - name: Verify code and tests
