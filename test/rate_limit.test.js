@@ -114,21 +114,24 @@ test("client IP ignores spoofed X-Forwarded-For and uses the transport IP", () =
   );
 });
 
-test("independent client IPs receive separate buckets; spoofed headers cannot switch buckets", async () => {
-  const limiter = createMemoryRateLimiter();
-  const clientA = clientKey({
-    ip: "192.0.2.1",
-    headers: { "x-forwarded-for": "198.51.100.1" },
-  });
-  const clientB = clientKey({
-    ip: "192.0.2.2",
-    headers: { "x-forwarded-for": "198.51.100.1" },
-  });
-  assert.notEqual(clientA, clientB);
-  assert.equal((await limiter.limit("github-status", clientA)).success, true);
-  assert.equal((await limiter.limit("github-status", clientB)).success, true);
-  assert.equal((await limiter.limit("github-status", clientA)).success, true);
-});
+test(
+  "independent client IPs receive separate buckets; spoofed headers cannot switch buckets",
+  async () => {
+    const limiter = createMemoryRateLimiter();
+    const clientA = clientKey({
+      ip: "192.0.2.1",
+      headers: { "x-forwarded-for": "198.51.100.1" },
+    });
+    const clientB = clientKey({
+      ip: "192.0.2.2",
+      headers: { "x-forwarded-for": "198.51.100.1" },
+    });
+    assert.notEqual(clientA, clientB);
+    assert.equal((await limiter.limit("github-status", clientA)).success, true);
+    assert.equal((await limiter.limit("github-status", clientB)).success, true);
+    assert.equal((await limiter.limit("github-status", clientA)).success, true);
+  },
+);
 
 test("Vercel production fails closed when KV credentials are missing", () => {
   const names = [
