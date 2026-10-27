@@ -202,10 +202,18 @@ export function createHandler({
       }
     }
 
-    if (action === "github-status" && githubFetcher === fetchGitHubData && !process.env.GITHUB_TOKEN) {
+    if (
+      action === "github-status" &&
+      githubFetcher === fetchGitHubData &&
+      !process.env.GITHUB_TOKEN
+    ) {
       return res.status(503).send("GitHub API is not configured");
     }
-    if (action === "steam-status" && steamFetcher === fetchSteamStatus && !process.env.STEAM_API_KEY) {
+    if (
+      action === "steam-status" &&
+      steamFetcher === fetchSteamStatus &&
+      !process.env.STEAM_API_KEY
+    ) {
       return res.status(503).send("Steam API is not configured");
     }
 
