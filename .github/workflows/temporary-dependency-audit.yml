@@ -25,6 +25,15 @@ jobs:
         run: npm audit fix || true
       - name: Verify code and tests
         run: npm run check
+      - name: Audit production dependencies
+        run: |
+          npm audit --omit=dev --json > production-audit.json || true
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const report = JSON.parse(fs.readFileSync("production-audit.json", "utf8"));
+            console.log("PRODUCTION_SUMMARY", JSON.stringify(report.metadata?.vulnerabilities ?? {}));
+          '
+          rm -f production-audit.json
       - name: Report remaining vulnerabilities
         run: |
           npm audit --json > audit.json || true
