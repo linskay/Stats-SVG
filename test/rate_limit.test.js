@@ -130,7 +130,6 @@ test("independent client IPs receive separate buckets; spoofed headers cannot sw
   assert.equal((await limiter.limit("github-status", clientA)).success, true);
 });
 
-
 test("Vercel production fails closed when KV credentials are missing", () => {
   const names = [
     "VERCEL_ENV",
