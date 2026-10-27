@@ -126,4 +126,3 @@ export function createRateLimitMiddleware(limiter) {
   };
 }
 
-export { clientKey };
