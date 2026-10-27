@@ -27,7 +27,7 @@
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/release-notes-generator": "^14.1.0",
     "@semantic-release/github": "^12.0.0",
-    "vercel": "53.2.0"
+    "vercel": "50.41.0"
   },
   "engines": {
     "node": ">=24.0.0"
