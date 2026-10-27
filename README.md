@@ -147,7 +147,7 @@ On Vercel production deployments the same endpoint-specific limits are counted a
 | `STEAM_API_KEY`                         | `/api/steam-status`  | Authenticates requests to the Steam Web API.                                                                                                                                                   |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel production    | Vercel KV or Upstash Redis REST credentials for distributed rate limiting.                                                                                                                     |
 
-`/api/leetcode-status` does not require an environment variable: it queries LeetCode's public GraphQL endpoint. Set the variables in the deployment platform's environment-variable settings (or in a local `.env` file); never commit their values to the repository.
+`/api/leetcode-status` does not require an environment variable: it queries LeetCode's public GraphQL endpoint. On Vercel production, missing KV/Upstash REST credentials cause the API module to fail during initialization rather than silently disabling distributed rate limiting. Missing `GITHUB_TOKEN` or `STEAM_API_KEY` returns HTTP 503 for the affected endpoint. For local development, `npm start` uses an in-memory limiter and listens on port 3000; configure provider keys in a local `.env` file to use GitHub or Steam endpoints. Never commit secret values. The rate limiter does not trust `X-Forwarded-For` directly; deploy behind a platform that supplies a trusted client IP (`req.ip` or the socket address), and do not enable broad Express `trust proxy` settings without restricting trusted proxy hops.
 
 ## Contributing
 
