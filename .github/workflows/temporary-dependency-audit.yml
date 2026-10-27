@@ -32,6 +32,7 @@ jobs:
               console.log(JSON.stringify({name, severity:item.severity, isDirect:item.isDirect, range:item.range, fixAvailable:item.fixAvailable}));
             }
           '
+          rm -f audit.json
       - name: Commit safe dependency updates
         run: |
           if ! git diff --quiet -- package.json package-lock.json; then
