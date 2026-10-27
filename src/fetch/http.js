@@ -1,8 +1,4 @@
 import axios from "axios";
-import pkg from "http2-wrapper";
-
-const { http2Adapter } = pkg;
-
 // Leave a small portion of the request budget for data processing and rendering.
 export const REQUEST_DEADLINE_MS = 9_000;
 const UPSTREAM_TIMEOUT_MS = 7_000;
@@ -52,7 +48,7 @@ function createClient(options) {
   });
 }
 
-export const githubClient = createClient({ adapter: http2Adapter });
+export const githubClient = createClient({ httpVersion: 2 });
 export const leetcodeClient = createClient();
 export const steamClient = createClient();
 
