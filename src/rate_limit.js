@@ -83,7 +83,9 @@ export function createDistributedRateLimiter({
     async limit(action, key) {
       const config = rateLimitConfig[action];
       if (!config) return { success: true };
-      const redisKey = `rate-limit:${action}:${key}:${Math.floor(Date.now() / (config.windowSeconds * 1_000))}`;
+      const redisKey = `rate-limit:${action}:${key}:${Math.floor(
+        Date.now() / (config.windowSeconds * 1_000),
+      )}`;
       const response = await fetcher(`${url.replace(/\/$/, "")}/pipeline`, {
         method: "POST",
         headers: {
