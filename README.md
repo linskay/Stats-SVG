@@ -141,11 +141,11 @@ On Vercel production deployments the same endpoint-specific limits are counted a
 
 ### Environment variables
 
-| Variable        | Required for         | Purpose                                                                                                                                                                                        |
-| --------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_TOKEN`  | `/api/github-status` | Authenticates requests to the GitHub GraphQL API. For a public deployment, it must be a dedicated least-privileged token with no access to private repositories or other private account data. |
-| `STEAM_API_KEY` | `/api/steam-status`  | Authenticates requests to the Steam Web API.                                                                                                                                                   |
-| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel production | Vercel KV or Upstash Redis REST credentials for distributed rate limiting. |
+| Variable                                | Required for         | Purpose                                                                                                                                                                                        |
+| --------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN`                          | `/api/github-status` | Authenticates requests to the GitHub GraphQL API. For a public deployment, it must be a dedicated least-privileged token with no access to private repositories or other private account data. |
+| `STEAM_API_KEY`                         | `/api/steam-status`  | Authenticates requests to the Steam Web API.                                                                                                                                                   |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Vercel production    | Vercel KV or Upstash Redis REST credentials for distributed rate limiting.                                                                                                                     |
 
 `/api/leetcode-status` does not require an environment variable: it queries LeetCode's public GraphQL endpoint. Set the variables in the deployment platform's environment-variable settings (or in a local `.env` file); never commit their values to the repository.
 
