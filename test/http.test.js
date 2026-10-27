@@ -83,7 +83,6 @@ test("converts an upstream timeout into a temporary-unavailable error", async ()
   }
 });
 
-
 test("GitHub Axios client keeps the HTTP/2 adapter configured", () => {
   assert.equal(githubClient.defaults.adapter, http2Wrapper.http2Adapter);
 });
