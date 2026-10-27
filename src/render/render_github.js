@@ -16,7 +16,7 @@ const image_base64 = fs.readFileSync(
   "base64",
 );
 // get the dimensions of the image
-const dimensions = sizeOf(path.join(__dirname, "../asset/image.gif"));
+const dimensions = sizeOf(fs.readFileSync(path.join(__dirname, "../asset/image.gif")));
 
 // Load the Base64 encoded fonts
 const fontsBase64 = JSON.parse(
