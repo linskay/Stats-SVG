@@ -6,7 +6,7 @@ on:
       - .github/workflows/temporary-dependency-fix.yml
       - package.json
 permissions:
-  contents: read
+  contents: write
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -26,3 +26,12 @@ jobs:
         run: |
           npm ci
           npm run check
+      - name: Commit regenerated lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(deps): regenerate lockfile with security overrides"
+            git push origin HEAD:fix/sync-package-lock
+          fi
