@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createDistributedRateLimiter,
   createMemoryRateLimiter,
+  clientKey,
   createRateLimitMiddleware,
   rateLimitConfig,
 } from "../src/rate_limit.js";
@@ -88,4 +89,46 @@ test("distributed limiter uses an atomic KV pipeline and reports its TTL", async
   assert.equal(keyCount, 1);
   assert.match(redisKey, /^rate-limit:github-status:203\.0\.113\.1:/);
   assert.equal(windowSeconds, 60);
+});
+
+
+test("client IP ignores spoofed X-Forwarded-For and uses the transport IP", () => {
+  assert.equal(
+    clientKey({
+      headers: { "x-forwarded-for": "198.51.100.99, 203.0.113.7" },
+      ip: "192.0.2.10",
+      socket: { remoteAddress: "192.0.2.11" },
+    }),
+    "192.0.2.10",
+  );
+  assert.equal(
+    clientKey({
+      headers: { "x-forwarded-for": "198.51.100.99" },
+      socket: { remoteAddress: "192.0.2.11" },
+    }),
+    "192.0.2.11",
+  );
+  assert.equal(
+    clientKey({ headers: { "x-forwarded-for": "198.51.100.99" } }),
+    "anonymous",
+  );
+});
+
+test("independent client IPs receive separate buckets; spoofed headers cannot switch buckets", async () => {
+  const limiter = createMemoryRateLimiter();
+  const clientA = clientKey({
+    ip: "192.0.2.1",
+    headers: { "x-forwarded-for": "198.51.100.1" },
+  });
+  const clientB = clientKey({
+    ip: "192.0.2.2",
+    headers: { "x-forwarded-for": "198.51.100.1" },
+  });
+  assert.notEqual(clientA, clientB);
+  assert.equal((await limiter.limit("github-status", clientA)).success, true);
+  assert.equal((await limiter.limit("github-status", clientB)).success, true);
+  assert.equal(
+    (await limiter.limit("github-status", clientA)).success,
+    true,
+  );
 });
