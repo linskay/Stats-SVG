@@ -5,7 +5,7 @@ on:
     branches: [fix/sync-package-lock]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   audit:
@@ -17,7 +17,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - name: Audit dependency tree
+      - name: Apply non-breaking security fixes
+        run: npm audit fix
+      - name: Verify code and tests
+        run: npm run check
+      - name: Report remaining vulnerabilities
         run: |
           npm audit --json > audit.json || true
           node --input-type=module -e '
@@ -25,13 +29,17 @@ jobs:
             const report = JSON.parse(fs.readFileSync("audit.json", "utf8"));
             console.log("SUMMARY", JSON.stringify(report.metadata?.vulnerabilities ?? {}));
             for (const [name, item] of Object.entries(report.vulnerabilities ?? {})) {
-              console.log(JSON.stringify({
-                name,
-                severity: item.severity,
-                isDirect: item.isDirect,
-                range: item.range,
-                fixAvailable: item.fixAvailable,
-                via: item.via.map(v => typeof v === "string" ? v : {name:v.name, title:v.title, range:v.range, url:v.url})
-              }));
+              console.log(JSON.stringify({name, severity:item.severity, isDirect:item.isDirect, range:item.range, fixAvailable:item.fixAvailable}));
             }
           '
+      - name: Commit safe dependency updates
+        run: |
+          if ! git diff --quiet -- package.json package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package.json package-lock.json
+            git commit -m "fix: apply non-breaking npm security updates"
+            git push
+          else
+            echo "No dependency changes were needed."
+          fi
